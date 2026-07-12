@@ -3,11 +3,15 @@
   "version": "1.0.0",
   "description": "AI Health Coach ที่ดึงข้อมูล Google Fit, วิเคราะห์ด้วย Gemini และส่งเข้า Discord",
   "main": "dist/index.js",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "dev": "ts-node src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "build:ci": "tsc --noEmit && tsc"
   },
   "keywords": ["health-coach", "google-fit", "gemini-ai", "discord"],
   "author": "",
@@ -22,3 +26,4 @@
     "typescript": "^5.4.5"
   }
 }
+

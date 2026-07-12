@@ -3,8 +3,9 @@
 
 import dotenv from "dotenv";
 
-// โหลด .env ก่อนทุกอย่าง
-dotenv.config();
+// โหลด .env ถ้ามีไฟล์ (local dev)
+// บน GitHub Actions: env vars ถูก inject จาก Secrets โดยอัตโนมัติ ไม่ต้องมีไฟล์ .env
+dotenv.config({ override: false }); // override: false = ไม่ทับค่าที่ runner inject มาแล้ว
 
 import { getAccessToken } from "./auth";
 import { fetchYesterdayHealthData } from "./googleFit";
