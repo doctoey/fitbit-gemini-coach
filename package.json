@@ -1,0 +1,24 @@
+{
+  "name": "fitbit-gemini-coach",
+  "version": "1.0.0",
+  "description": "AI Health Coach ที่ดึงข้อมูล Google Fit, วิเคราะห์ด้วย Gemini และส่งเข้า Discord",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "lint": "tsc --noEmit"
+  },
+  "keywords": ["health-coach", "google-fit", "gemini-ai", "discord"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.7.2",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}

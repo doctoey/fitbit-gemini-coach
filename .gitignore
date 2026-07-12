@@ -1,0 +1,15 @@
+node_modules/
+dist/
+
+# 🔒 ไฟล์ความลับ — ห้าม commit เด็ดขาด!
+.env
+*.json.bak
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.suo
