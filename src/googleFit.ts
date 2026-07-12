@@ -15,74 +15,88 @@ interface YesterdayRange {
 }
 
 function getYesterdayRange(timezone: string = "Asia/Bangkok"): YesterdayRange {
-  // ใช้ Intl.DateTimeFormat เพื่อให้ถูก timezone ของผู้ใช้
   const now = new Date();
 
-  // หา "เมื่อวาน" ใน local timezone
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
+  // ─── Step 1: หาวันเมื่อวานใน timezone ที่ระบุ ────────────────────────────
+  // ใช้ en-CA locale เพราะ format ออกมาเป็น "YYYY-MM-DD" ตรงๆ
+  const todayLabel = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(now);
+  const [ty, tm, td] = todayLabel.split("-").map(Number);
 
-  // ดึง year/month/day ตาม timezone
-  const fmt = new Intl.DateTimeFormat("en-CA", {
+  // ลบ 1 วัน (ใช้ UTC noon เพื่อป้องกัน DST edge case)
+  const yesterdayNoon = Date.UTC(ty, tm - 1, td - 1, 12, 0, 0);
+  const dateLabel = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(
+    new Date(yesterdayNoon)
+  );
+  const [dy, dm, dd] = dateLabel.split("-").map(Number);
+
+  // ─── Step 2: หา UTC offset ที่แท้จริงของ timezone ─────────────────────────
+  // สร้าง probe = UTC midnight ของวันเมื่อวาน แล้วดูว่า local time เป็นเท่าไหร่
+  const utcMidnight = Date.UTC(dy, dm - 1, dd, 0, 0, 0);
+  const probe = new Date(utcMidnight);
+
+  // ดึง local hour และ minute ณ probe time
+  const timeParts = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  const [{ value: year }, , { value: month }, , { value: day }] =
-    fmt.formatToParts(yesterday);
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(probe);
 
-  const dateLabel = `${year}-${month}-${day}`;
+  const localHour = Number(timeParts.find((p) => p.type === "hour")?.value ?? "0") % 24;
+  const localMin = Number(timeParts.find((p) => p.type === "minute")?.value ?? "0");
 
-  // ต้นวัน 00:00:00 local time → UTC ms
-  const startLocal = new Date(`${dateLabel}T00:00:00`);
-  const endLocal = new Date(`${dateLabel}T23:59:59.999`);
+  // offsetMs = เวลาที่ timezone เร็วกว่า UTC (บวก = ahead, ลบ = behind)
+  // ตัวอย่าง Bangkok UTC+7: probe ที่ 00:00 UTC → local = 07:00 → offsetMs = +7h
+  // สูตร: UTC midnight ของ local = utcMidnight - offsetMs
+  const offsetMs = (localHour * 3600 + localMin * 60) * 1000;
 
-  // แปลงเป็น UTC โดยคำนึง offset ของ timezone ที่ระบุ
-  const offsetMs = getTimezoneOffsetMs(timezone, startLocal);
-
-  const startMs = startLocal.getTime() - offsetMs;
-  const endMs = endLocal.getTime() - offsetMs;
+  const startMs = utcMidnight - offsetMs;          // เที่ยงคืน local → UTC
+  const endMs = startMs + 86_400_000 - 1;          // +24h - 1ms
 
   return { startMs, endMs, dateLabel };
 }
 
-/** คำนวณ offset (ms) ของ timezone ที่ระบุ */
-function getTimezoneOffsetMs(timezone: string, date: Date): number {
-  // ดู UTC offset จริงๆ ของ timezone ณ วันนั้น
-  const utcStr = date.toLocaleString("en-US", { timeZone: "UTC" });
-  const localStr = date.toLocaleString("en-US", { timeZone: timezone });
-  const diff = new Date(utcStr).getTime() - new Date(localStr).getTime();
-  return diff;
-}
-
 // ─── API Calls ───────────────────────────────────────────────────────────────
+
+/** พ่น error detail ของ Google API ออกมาให้อ่านได้ใน log */
+function handleGoogleApiError(label: string, error: unknown): never {
+  if (axios.isAxiosError(error) && error.response) {
+    console.error(`❌ [${label}] Google API Error ${error.response.status}:`);
+    console.error("   Detail:", JSON.stringify(error.response.data, null, 2));
+  } else {
+    console.error(`❌ [${label}] Unknown error:`, error);
+  }
+  throw error;
+}
 
 /** ดึงข้อมูล Aggregate (ก้าวเดิน, หัวใจ) ผ่าน /dataset:aggregate */
 async function fetchAggregate(
   accessToken: string,
-  dataSourceIds: string[],
   aggregateBy: Array<{ dataTypeName: string }>,
   startMs: number,
   endMs: number,
 ): Promise<AggregateResponse> {
   const url = `${FIT_BASE}/dataset:aggregate`;
+  const label = aggregateBy.map((a) => a.dataTypeName).join(", ");
 
   const body = {
     aggregateBy,
-    bucketByTime: { durationMillis: endMs - startMs },
+    bucketByTime: { durationMillis: 86_400_000 }, // 1 วันพอดี
     startTimeMillis: startMs.toString(),
     endTimeMillis: endMs.toString(),
   };
 
-  const response = await axios.post<AggregateResponse>(url, body, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-  });
-
-  return response.data;
+  try {
+    const response = await axios.post<AggregateResponse>(url, body, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+    });
+    return response.data;
+  } catch (error) {
+    handleGoogleApiError(`Aggregate: ${label}`, error);
+  }
 }
 
 /** ดึง Sleep sessions ผ่าน /sessions */
@@ -91,19 +105,22 @@ async function fetchSleepSessions(
   startMs: number,
   endMs: number,
 ): Promise<SleepSessionsResponse> {
-  // Google Fit Sleep: activityType=72 (sleep)
+  // Google Fit Sleep: activityType=72
   const url = `${FIT_BASE}/sessions`;
 
-  const response = await axios.get<SleepSessionsResponse>(url, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-    params: {
-      startTime: new Date(startMs).toISOString(),
-      endTime: new Date(endMs).toISOString(),
-      activityType: 72,
-    },
-  });
-
-  return response.data;
+  try {
+    const response = await axios.get<SleepSessionsResponse>(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: {
+        startTime: new Date(startMs).toISOString(),
+        endTime: new Date(endMs).toISOString(),
+        activityType: 72,
+      },
+    });
+    return response.data;
+  } catch (error) {
+    handleGoogleApiError("Sleep Sessions", error);
+  }
 }
 
 // ─── Parser: แปลง raw data เป็น HealthData ──────────────────────────────────
@@ -194,28 +211,26 @@ export async function fetchYesterdayHealthData(
 
   console.log("📊 กำลังดึงข้อมูล Google Fit...");
 
-  const [stepsData, heartRateData, sleepData] = await Promise.all([
-    // 1. ก้าวเดิน
-    fetchAggregate(
-      accessToken,
-      [],
-      [{ dataTypeName: "com.google.step_count.delta" }],
-      startMs,
-      endMs,
-    ),
+  // ─── ดึงทีละ call เพื่อให้ log บอกได้ว่า call ไหนพัง ─────────────────────
 
-    // 2. อัตราการเต้นหัวใจ (avg, min, max ต่อ bucket)
-    fetchAggregate(
-      accessToken,
-      [],
-      [{ dataTypeName: "com.google.heart_rate.bpm" }],
-      startMs,
-      endMs,
-    ),
+  console.log("  ├─ 1/3 ก้าวเดิน...");
+  const stepsData = await fetchAggregate(
+    accessToken,
+    [{ dataTypeName: "com.google.step_count.delta" }],
+    startMs,
+    endMs,
+  );
 
-    // 3. การนอนหลับ (sessions)
-    fetchSleepSessions(accessToken, startMs, endMs),
-  ]);
+  console.log("  ├─ 2/3 อัตราการเต้นหัวใจ...");
+  const heartRateData = await fetchAggregate(
+    accessToken,
+    [{ dataTypeName: "com.google.heart_rate.bpm" }],
+    startMs,
+    endMs,
+  );
+
+  console.log("  └─ 3/3 การนอนหลับ...");
+  const sleepData = await fetchSleepSessions(accessToken, startMs, endMs);
 
   // ─── แปลงข้อมูล ────────────────────────────────────────────────────────
 
