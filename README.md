@@ -1,6 +1,6 @@
 # 🏃 AI Health Coach
 
-ระบบ **AI Health Coach** ส่วนตัวที่รันอัตโนมัติทุกเช้า  
+ระบบ **AI Health Coach** ส่วนตัวที่รันอัตโนมัติทุกเช้าผ่าน **GitHub Actions**  
 ดึงข้อมูลจาก **Google Fit** → วิเคราะห์ด้วย **Gemini AI** → ส่งรายงานเข้า **Discord**
 
 ---
@@ -9,6 +9,9 @@
 
 ```
 fitbit-gemini-coach/
+├── .github/
+│   └── workflows/
+│       └── health-coach.yml  # ⏰ GitHub Actions (รันทุกวัน 09:00 น. ไทย)
 ├── src/
 │   ├── index.ts       # 🎯 Entry point — Orchestrator หลัก
 │   ├── auth.ts        # 🔑 Google OAuth token refresh
@@ -16,8 +19,8 @@ fitbit-gemini-coach/
 │   ├── gemini.ts      # 🤖 Gemini AI Analysis
 │   ├── discord.ts     # 📨 Discord Webhook sender
 │   └── types.ts       # 📐 TypeScript interfaces
-├── .env               # 🔒 ค่าลับ (ห้าม commit!)
-├── .env.example       # 📋 ตัวอย่าง .env
+├── .env.example       # 📋 ตัวอย่าง environment variables
+├── .gitignore
 ├── package.json
 ├── tsconfig.json
 └── README.md
@@ -25,7 +28,7 @@ fitbit-gemini-coach/
 
 ---
 
-## 🚀 วิธีติดตั้งและรัน
+## 🚀 วิธีติดตั้งและรัน (Local)
 
 ### 1. ติดตั้ง Dependencies
 
@@ -36,11 +39,9 @@ npm install
 ### 2. ตั้งค่า Environment Variables
 
 ```bash
-# คัดลอก template
 cp .env.example .env
+# จากนั้นเปิด .env และใส่ค่าจริงทั้งหมด
 ```
-
-จากนั้นเปิดไฟล์ `.env` และใส่ค่าทั้งหมด:
 
 ```env
 GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
@@ -54,78 +55,52 @@ TIMEZONE=Asia/Bangkok
 ### 3. รันทดสอบ
 
 ```bash
-npm run dev
+npm run dev        # รันด้วย ts-node (ไม่ต้อง build)
 ```
 
-### 4. Build Production
+### 4. Build & รัน Production
 
 ```bash
-npm run build
-node dist/index.js
+npm run build      # Compile TypeScript → dist/
+npm start          # รัน node dist/index.js
 ```
 
 ---
 
-## ⏰ ตั้งค่า Cron Job (รันอัตโนมัติทุกเช้า)
+## ⏰ รันอัตโนมัติด้วย GitHub Actions
 
-### macOS / Linux
+ระบบใช้ **GitHub Actions Scheduled Workflow** แทน cron job บนเครื่อง ไม่ต้องเปิดคอมพิวเตอร์ทิ้งไว้
 
-เปิด crontab:
-```bash
-crontab -e
-```
+**กำหนดการ:** ทุกวัน **09:00 น. เวลาไทย** (= 02:00 UTC)
 
-เพิ่มบรรทัดนี้ (รันทุกวัน เวลา 07:00 น.):
-```cron
-0 7 * * * cd /Users/YOUR_USERNAME/Documents/code/fitbit-gemini-coach && node dist/index.js >> logs/health-coach.log 2>&1
-```
+### ตั้งค่า GitHub Secrets
 
-สร้างโฟลเดอร์ logs:
-```bash
-mkdir -p logs
-```
+ไปที่ **GitHub Repo → Settings → Secrets and variables → Actions → New repository secret**  
+เพิ่ม secrets ทั้ง 5 ตัว:
 
-### ทางเลือก: ใช้ launchd บน macOS (แนะนำกว่า cron)
+| Secret Name | ค่าที่ใส่ |
+|-------------|----------|
+| `GOOGLE_CLIENT_ID` | client_id จาก Google Cloud Console |
+| `GOOGLE_CLIENT_SECRET` | client_secret จาก Google Cloud Console |
+| `GOOGLE_REFRESH_TOKEN` | refresh_token ที่มีสิทธิ์ Fitness API |
+| `GEMINI_API_KEY` | API key จาก [Google AI Studio](https://aistudio.google.com/app/apikey) |
+| `DISCORD_WEBHOOK_URL` | Webhook URL จาก Discord Server Settings |
 
-สร้างไฟล์ `~/Library/LaunchAgents/com.healthcoach.plist`:
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.healthcoach</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/usr/local/bin/node</string>
-        <string>/Users/YOUR_USERNAME/Documents/code/fitbit-gemini-coach/dist/index.js</string>
-    </array>
-    <key>WorkingDirectory</key>
-    <string>/Users/YOUR_USERNAME/Documents/code/fitbit-gemini-coach</string>
-    <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>7</integer>
-        <key>Minute</key>
-        <integer>0</integer>
-    </dict>
-    <key>StandardOutPath</key>
-    <string>/Users/YOUR_USERNAME/Documents/code/fitbit-gemini-coach/logs/health-coach.log</string>
-    <key>StandardErrorPath</key>
-    <string>/Users/YOUR_USERNAME/Documents/code/fitbit-gemini-coach/logs/health-coach-error.log</string>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin</string>
-    </dict>
-</dict>
-</plist>
-```
+### ทดสอบรัน Workflow ทันที
 
-โหลด launchd:
-```bash
-launchctl load ~/Library/LaunchAgents/com.healthcoach.plist
-```
+ไปที่ **GitHub Repo → Actions → 🏃 Daily Health Coach Report → Run workflow**
+
+---
+
+## 📦 Scripts
+
+| Script | คำสั่ง | ใช้เมื่อไหร่ |
+|--------|--------|------------|
+| `dev` | `ts-node src/index.ts` | ทดสอบบน local |
+| `build` | `tsc` | Compile TypeScript |
+| `start` | `node dist/index.js` | รัน production (ใช้ใน GitHub Actions) |
+| `build:ci` | `tsc --noEmit && tsc` | Type-check + build รวมขั้นตอนเดียว |
+| `lint` | `tsc --noEmit` | ตรวจ type errors |
 
 ---
 
@@ -133,10 +108,11 @@ launchctl load ~/Library/LaunchAgents/com.healthcoach.plist
 
 | สิ่งที่ทำ | เหตุผล |
 |-----------|--------|
-| เก็บ secrets ใน `.env` | ไม่อยู่ใน source code |
-| `.env` อยู่ใน `.gitignore` | ไม่ถูก commit เข้า Git |
+| Secrets เก็บใน GitHub Secrets | เข้ารหัสและ mask ในทุก log อัตโนมัติ |
+| `.env` อยู่ใน `.gitignore` | ไม่ถูก commit เข้า Git เด็ดขาด |
 | ใช้ `refresh_token` ไม่ใช่ `access_token` | `access_token` หมดอายุใน 1 ชม. |
 | แลก token ใหม่ทุกครั้งที่รัน | ได้ token สดใหม่เสมอ |
+| `dotenv({ override: false })` | GitHub Secrets มีความสำคัญกว่า `.env` เสมอ |
 
 ---
 
