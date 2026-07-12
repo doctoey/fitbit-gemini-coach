@@ -10,52 +10,79 @@ export interface GoogleTokenResponse {
   scope: string;
 }
 
-// ─── Google Fit API ──────────────────────────────────────────────────────────
+// ─── Google Health API v4 ────────────────────────────────────────────────────
+// Schema อ้างอิงจาก: https://health.googleapis.com/$discovery/rest?version=v4
 
-export interface DataPoint {
-  startTimeNanos: string;
-  endTimeNanos: string;
-  dataTypeName: string;
-  value: Array<{
-    intVal?: number;
-    fpVal?: number;
-    mapVal?: Array<{ key: string; value: { fpVal?: number; intVal?: number } }>;
-  }>;
+/** วันที่แบบ civil time ที่ Google Health API v4 ใช้ */
+export interface CivilDateTime {
+  date: {
+    year: number;
+    month: number;
+    day: number;
+  };
+  time?: {
+    hours?: number;
+    minutes?: number;
+    seconds?: number;
+    nanos?: number;
+  };
 }
 
-export interface AggregateResponse {
-  bucket: Array<{
-    startTimeMillis: string;
-    endTimeMillis: string;
-    dataset: Array<{
-      dataSourceId: string;
-      point: DataPoint[];
-    }>;
-  }>;
+/** ช่วงเวลาสำหรับ dailyRollUp request */
+export interface CivilTimeInterval {
+  start: CivilDateTime;
+  end: CivilDateTime;
 }
 
-export interface SleepSession {
-  id: string;
-  name: string;
-  description: string;
-  startTimeMillis: string;
-  endTimeMillis: string;
-  activityType: number;
-  application: { name: string };
-  segments: Array<{
-    startTimeMillis: string;
-    endTimeMillis: string;
-    sleepStage: number;
-  }>;
+/** Request body สำหรับ POST .../dataPoints:dailyRollUp */
+export interface DailyRollUpRequest {
+  range: CivilTimeInterval;
+  windowSizeDays?: number;  // default 1
+  pageSize?: number;
+  pageToken?: string;
+  dataSourceFamily?: string;
 }
 
-export interface SleepSessionsResponse {
-  session: SleepSession[];
+/** Response: ก้าวเดิน — steps.countSum */
+export interface StepsRollupValue {
+  countSum: string; // int64 เป็น string ใน JSON
+}
+
+/** Response: อัตราการเต้นหัวใจ */
+export interface HeartRateRollupValue {
+  beatsPerMinuteAvg: number;
+  beatsPerMinuteMin: number;
+  beatsPerMinuteMax: number;
+}
+
+/** Response: Sleep summary */
+export interface SleepSummary {
+  minutesAsleep: string;         // int64 string
+  minutesInSleepPeriod: string;  // int64 string
+  minutesToFallAsleep: string;   // int64 string
+  minutesAwake: string;          // int64 string
+}
+
+/** Data point หนึ่งก้อน จาก dailyRollUp response */
+export interface DailyRollupDataPoint {
+  civilStartTime: CivilDateTime;
+  civilEndTime: CivilDateTime;
+  // field ที่ return ขึ้นอยู่กับ dataType ที่ query
+  steps?: StepsRollupValue;
+  heartRate?: HeartRateRollupValue;
+  sleep?: { summary?: SleepSummary };
+  [key: string]: unknown; // รองรับ field อื่นๆ
+}
+
+/** Response จาก dailyRollUp */
+export interface DailyRollUpResponse {
+  dataPoints: DailyRollupDataPoint[];
+  nextPageToken?: string;
 }
 
 // ─── Health Summary ──────────────────────────────────────────────────────────
 
-/** ข้อมูลสุขภาพรวมที่ดึงมาจาก Google Fit */
+/** ข้อมูลสุขภาพรวมที่ดึงมาจาก Google Health API v4 */
 export interface HealthData {
   date: string;                   // วันที่ เช่น "2024-07-11"
   steps: number;                  // จำนวนก้าว
@@ -66,11 +93,12 @@ export interface HealthData {
   heartRateMin: number;           // ต่ำสุด (bpm)
   heartRateMax: number;           // สูงสุด (bpm)
   rawData: {                      // JSON ดิบสำหรับส่งให้ Gemini
-    steps: AggregateResponse;
-    heartRate: AggregateResponse;
-    sleep: SleepSessionsResponse;
+    steps: DailyRollUpResponse;
+    heartRate: DailyRollUpResponse;
+    sleep: DailyRollUpResponse;
   };
 }
+
 
 // ─── Gemini AI ───────────────────────────────────────────────────────────────
 

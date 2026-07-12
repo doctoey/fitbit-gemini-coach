@@ -1,67 +1,79 @@
 // src/googleFit.ts
-// ดึงข้อมูลสุขภาพของ "เมื่อวาน" จาก Google Fit REST API
+// ดึงข้อมูลสุขภาพของ "เมื่อวาน" จาก Google Health API v4
+// Base URL: https://health.googleapis.com/v4/
+// Ref: https://health.googleapis.com/$discovery/rest?version=v4
 
 import axios from "axios";
-import { AggregateResponse, HealthData, SleepSessionsResponse } from "./types";
+import {
+  DailyRollUpRequest,
+  DailyRollUpResponse,
+  DailyRollupDataPoint,
+  HealthData,
+} from "./types";
 
-const FIT_BASE = "https://www.googleapis.com/fitness/v1/users/me";
+const HEALTH_BASE = "https://health.googleapis.com/v4";
 
-// ─── Helper: สร้างช่วงเวลาเมื่อวาน ─────────────────────────────────────────
+// ─── Helper: หาวันเมื่อวานใน civil time (year/month/day) ───────────────────
 
-interface YesterdayRange {
-  startMs: number; // timestamp milliseconds ต้นวัน 00:00
-  endMs: number; // timestamp milliseconds ปลายวัน 23:59:59.999
+interface YesterdayDate {
+  year: number;
+  month: number;
+  day: number;
   dateLabel: string; // เช่น "2024-07-11"
 }
 
-function getYesterdayRange(timezone: string = "Asia/Bangkok"): YesterdayRange {
+function getYesterdayDate(timezone: string = "Asia/Bangkok"): YesterdayDate {
   const now = new Date();
 
-  // ─── Step 1: หาวันเมื่อวานใน timezone ที่ระบุ ────────────────────────────
   // ใช้ en-CA locale เพราะ format ออกมาเป็น "YYYY-MM-DD" ตรงๆ
-  const todayLabel = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(now);
+  const todayLabel = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+  }).format(now);
   const [ty, tm, td] = todayLabel.split("-").map(Number);
 
   // ลบ 1 วัน (ใช้ UTC noon เพื่อป้องกัน DST edge case)
   const yesterdayNoon = Date.UTC(ty, tm - 1, td - 1, 12, 0, 0);
-  const dateLabel = new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(
-    new Date(yesterdayNoon)
-  );
-  const [dy, dm, dd] = dateLabel.split("-").map(Number);
-
-  // ─── Step 2: หา UTC offset ที่แท้จริงของ timezone ─────────────────────────
-  // สร้าง probe = UTC midnight ของวันเมื่อวาน แล้วดูว่า local time เป็นเท่าไหร่
-  const utcMidnight = Date.UTC(dy, dm - 1, dd, 0, 0, 0);
-  const probe = new Date(utcMidnight);
-
-  // ดึง local hour และ minute ณ probe time
-  const timeParts = new Intl.DateTimeFormat("en-US", {
+  const dateLabel = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(probe);
+  }).format(new Date(yesterdayNoon));
 
-  const localHour = Number(timeParts.find((p) => p.type === "hour")?.value ?? "0") % 24;
-  const localMin = Number(timeParts.find((p) => p.type === "minute")?.value ?? "0");
-
-  // offsetMs = เวลาที่ timezone เร็วกว่า UTC (บวก = ahead, ลบ = behind)
-  // ตัวอย่าง Bangkok UTC+7: probe ที่ 00:00 UTC → local = 07:00 → offsetMs = +7h
-  // สูตร: UTC midnight ของ local = utcMidnight - offsetMs
-  const offsetMs = (localHour * 3600 + localMin * 60) * 1000;
-
-  const startMs = utcMidnight - offsetMs;          // เที่ยงคืน local → UTC
-  const endMs = startMs + 86_400_000 - 1;          // +24h - 1ms
-
-  return { startMs, endMs, dateLabel };
+  const [year, month, day] = dateLabel.split("-").map(Number);
+  return { year, month, day, dateLabel };
 }
 
-// ─── API Calls ───────────────────────────────────────────────────────────────
+// ─── Helper: สร้าง CivilTimeInterval สำหรับ 1 วัน ──────────────────────────
 
-/** พ่น error detail ของ Google API ออกมาให้อ่านได้ใน log */
-function handleGoogleApiError(label: string, error: unknown): never {
+function buildDayRange(year: number, month: number, day: number): DailyRollUpRequest["range"] {
+  return {
+    // inclusive start = ต้นวัน 00:00
+    start: { date: { year, month, day } },
+    // exclusive end = ต้นวันถัดไป 00:00
+    // (Google Health API v4 ใช้ half-open interval [start, end))
+    end: buildNextDay(year, month, day),
+  };
+}
+
+function buildNextDay(
+  year: number,
+  month: number,
+  day: number
+): { date: { year: number; month: number; day: number } } {
+  // ใช้ Date object เพื่อ handle month rollover อัตโนมัติ
+  const d = new Date(Date.UTC(year, month - 1, day + 1));
+  return {
+    date: {
+      year: d.getUTCFullYear(),
+      month: d.getUTCMonth() + 1,
+      day: d.getUTCDate(),
+    },
+  };
+}
+
+// ─── Error Handler ───────────────────────────────────────────────────────────
+
+function handleApiError(label: string, error: unknown): never {
   if (axios.isAxiosError(error) && error.response) {
-    console.error(`❌ [${label}] Google API Error ${error.response.status}:`);
+    console.error(`❌ [${label}] Google Health API Error ${error.response.status}:`);
     console.error("   Detail:", JSON.stringify(error.response.data, null, 2));
   } else {
     console.error(`❌ [${label}] Unknown error:`, error);
@@ -69,25 +81,31 @@ function handleGoogleApiError(label: string, error: unknown): never {
   throw error;
 }
 
-/** ดึงข้อมูล Aggregate (ก้าวเดิน, หัวใจ) ผ่าน /dataset:aggregate */
-async function fetchAggregate(
-  accessToken: string,
-  aggregateBy: Array<{ dataTypeName: string }>,
-  startMs: number,
-  endMs: number,
-): Promise<AggregateResponse> {
-  const url = `${FIT_BASE}/dataset:aggregate`;
-  const label = aggregateBy.map((a) => a.dataTypeName).join(", ");
+// ─── API Call: dailyRollUp ───────────────────────────────────────────────────
 
-  const body = {
-    aggregateBy,
-    bucketByTime: { durationMillis: 86_400_000 }, // 1 วันพอดี
-    startTimeMillis: startMs.toString(),
-    endTimeMillis: endMs.toString(),
+/**
+ * เรียก Google Health API v4 ด้วย dailyRollUp
+ *
+ * Endpoint: POST /v4/users/me/dataTypes/{dataType}/dataPoints:dailyRollUp
+ *
+ * @param accessToken - Bearer token จาก OAuth
+ * @param dataType    - kebab-case data type เช่น "steps", "heart-rate", "sleep"
+ * @param range       - ช่วงเวลา civil time
+ */
+async function fetchDailyRollUp(
+  accessToken: string,
+  dataType: string,
+  range: DailyRollUpRequest["range"]
+): Promise<DailyRollUpResponse> {
+  const url = `${HEALTH_BASE}/users/me/dataTypes/${dataType}/dataPoints:dailyRollUp`;
+
+  const body: DailyRollUpRequest = {
+    range,
+    windowSizeDays: 1, // รวมข้อมูลเป็น bucket ละ 1 วัน
   };
 
   try {
-    const response = await axios.post<AggregateResponse>(url, body, {
+    const response = await axios.post<DailyRollUpResponse>(url, body, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
         "Content-Type": "application/json",
@@ -95,44 +113,18 @@ async function fetchAggregate(
     });
     return response.data;
   } catch (error) {
-    handleGoogleApiError(`Aggregate: ${label}`, error);
+    handleApiError(`dailyRollUp/${dataType}`, error);
   }
 }
 
-/** ดึง Sleep sessions ผ่าน /sessions */
-async function fetchSleepSessions(
-  accessToken: string,
-  startMs: number,
-  endMs: number,
-): Promise<SleepSessionsResponse> {
-  // Google Fit Sleep: activityType=72
-  const url = `${FIT_BASE}/sessions`;
+// ─── Parsers ─────────────────────────────────────────────────────────────────
 
-  try {
-    const response = await axios.get<SleepSessionsResponse>(url, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      params: {
-        startTime: new Date(startMs).toISOString(),
-        endTime: new Date(endMs).toISOString(),
-        activityType: 72,
-      },
-    });
-    return response.data;
-  } catch (error) {
-    handleGoogleApiError("Sleep Sessions", error);
-  }
-}
-
-// ─── Parser: แปลง raw data เป็น HealthData ──────────────────────────────────
-
-function parseSteps(data: AggregateResponse): number {
+function parseSteps(data: DailyRollUpResponse): number {
   let total = 0;
-  for (const bucket of data.bucket ?? []) {
-    for (const ds of bucket.dataset ?? []) {
-      for (const point of ds.point ?? []) {
-        total += point.value[0]?.intVal ?? 0;
-      }
-    }
+  for (const point of data.dataPoints ?? []) {
+    // steps.countSum เป็น int64 ที่ API ส่งมาเป็น string
+    const countSum = point.steps?.countSum;
+    if (countSum) total += parseInt(countSum, 10);
   }
   return total;
 }
@@ -143,27 +135,26 @@ interface HeartRateStats {
   max: number;
 }
 
-function parseHeartRate(data: AggregateResponse): HeartRateStats {
-  let sumAvg = 0,
-    globalMin = Infinity,
-    globalMax = -Infinity,
-    count = 0;
+function parseHeartRate(data: DailyRollUpResponse): HeartRateStats {
+  // dailyRollUp ส่ง heartRate ต่อ bucket
+  // ถ้ามีหลาย bucket ให้เฉลี่ย avg และหา min/max รวม
+  let sumAvg = 0;
+  let globalMin = Infinity;
+  let globalMax = -Infinity;
+  let count = 0;
 
-  for (const bucket of data.bucket ?? []) {
-    for (const ds of bucket.dataset ?? []) {
-      for (const point of ds.point ?? []) {
-        const avg = point.value[0]?.fpVal;
-        const min = point.value[1]?.fpVal;
-        const max = point.value[2]?.fpVal;
+  for (const point of data.dataPoints ?? []) {
+    const hr = point.heartRate;
+    if (!hr) continue;
 
-        if (avg !== undefined) {
-          sumAvg += avg;
-          count++;
-        }
-        if (min !== undefined && min < globalMin) globalMin = min;
-        if (max !== undefined && max > globalMax) globalMax = max;
-      }
+    if (hr.beatsPerMinuteAvg > 0) {
+      sumAvg += hr.beatsPerMinuteAvg;
+      count++;
     }
+    if (hr.beatsPerMinuteMin > 0 && hr.beatsPerMinuteMin < globalMin)
+      globalMin = hr.beatsPerMinuteMin;
+    if (hr.beatsPerMinuteMax > 0 && hr.beatsPerMinuteMax > globalMax)
+      globalMax = hr.beatsPerMinuteMax;
   }
 
   return {
@@ -173,16 +164,16 @@ function parseHeartRate(data: AggregateResponse): HeartRateStats {
   };
 }
 
-function parseSleepMinutes(data: SleepSessionsResponse): number {
-  let totalMs = 0;
-  for (const session of data.session ?? []) {
-    const start = parseInt(session.startTimeMillis, 10);
-    const end = parseInt(session.endTimeMillis, 10);
-    if (!isNaN(start) && !isNaN(end)) {
-      totalMs += end - start;
-    }
+function parseSleepMinutes(data: DailyRollUpResponse): number {
+  let total = 0;
+  for (const point of data.dataPoints ?? []) {
+    // minutesInSleepPeriod = เวลาอยู่บนเตียงรวม (รวม awake)
+    // minutesAsleep        = เวลาที่หลับจริง (ไม่รวม awake)
+    // เราใช้ minutesInSleepPeriod เพื่อให้ตรงกับ "ระยะเวลาการนอนหลับ"
+    const minutes = point.sleep?.summary?.minutesInSleepPeriod;
+    if (minutes) total += parseInt(minutes, 10);
   }
-  return Math.round(totalMs / 60000); // ms → นาที
+  return total;
 }
 
 function formatSleepDuration(minutes: number): string {
@@ -195,42 +186,31 @@ function formatSleepDuration(minutes: number): string {
 // ─── Main Export ─────────────────────────────────────────────────────────────
 
 /**
- * ดึงข้อมูลสุขภาพทั้งหมดของเมื่อวาน และคืน HealthData object
+ * ดึงข้อมูลสุขภาพทั้งหมดของเมื่อวานจาก Google Health API v4
+ * และคืน HealthData object ที่พร้อมส่งให้ Gemini วิเคราะห์
  */
 export async function fetchYesterdayHealthData(
-  accessToken: string,
+  accessToken: string
 ): Promise<HealthData> {
   const timezone = process.env.TIMEZONE ?? "Asia/Bangkok";
-  const { startMs, endMs, dateLabel } = getYesterdayRange(timezone);
+  const { year, month, day, dateLabel } = getYesterdayDate(timezone);
+  const range = buildDayRange(year, month, day);
 
   console.log(
-    `📅 ดึงข้อมูลวันที่: ${dateLabel} (${new Date(startMs).toISOString()} → ${new Date(endMs).toISOString()})`,
+    `📅 ดึงข้อมูลวันที่: ${dateLabel} (${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")} civil time)`
   );
-
-  // ─── ดึงพร้อมกัน 3 ชุด ──────────────────────────────────────────────────
-
-  console.log("📊 กำลังดึงข้อมูล Google Fit...");
+  console.log("📊 กำลังดึงข้อมูล Google Health API v4...");
 
   // ─── ดึงทีละ call เพื่อให้ log บอกได้ว่า call ไหนพัง ─────────────────────
 
-  console.log("  ├─ 1/3 ก้าวเดิน...");
-  const stepsData = await fetchAggregate(
-    accessToken,
-    [{ dataTypeName: "com.google.step_count.delta" }],
-    startMs,
-    endMs,
-  );
+  console.log("  ├─ 1/3 ก้าวเดิน (steps)...");
+  const stepsData = await fetchDailyRollUp(accessToken, "steps", range);
 
-  console.log("  ├─ 2/3 อัตราการเต้นหัวใจ...");
-  const heartRateData = await fetchAggregate(
-    accessToken,
-    [{ dataTypeName: "com.google.heart_rate.bpm" }],
-    startMs,
-    endMs,
-  );
+  console.log("  ├─ 2/3 อัตราการเต้นหัวใจ (heart-rate)...");
+  const heartRateData = await fetchDailyRollUp(accessToken, "heart-rate", range);
 
-  console.log("  └─ 3/3 การนอนหลับ...");
-  const sleepData = await fetchSleepSessions(accessToken, startMs, endMs);
+  console.log("  └─ 3/3 การนอนหลับ (sleep)...");
+  const sleepData = await fetchDailyRollUp(accessToken, "sleep", range);
 
   // ─── แปลงข้อมูล ────────────────────────────────────────────────────────
 
@@ -242,7 +222,7 @@ export async function fetchYesterdayHealthData(
   const stepGoalPercent = Math.round((steps / STEP_GOAL) * 100);
 
   console.log(
-    `✅ ก้าว: ${steps.toLocaleString()} | นอน: ${sleepMinutes} นาที | หัวใจ avg: ${heartRate.avg} bpm`,
+    `✅ ก้าว: ${steps.toLocaleString()} | นอน: ${sleepMinutes} นาที | หัวใจ avg: ${heartRate.avg} bpm`
   );
 
   return {
