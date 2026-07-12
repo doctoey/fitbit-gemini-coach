@@ -2,12 +2,16 @@
 // ดึงข้อมูลสุขภาพของ "เมื่อวาน" จาก Google Health API v4
 // Base URL: https://health.googleapis.com/v4/
 // Ref: https://health.googleapis.com/$discovery/rest?version=v4
+//
+// ⚠️  Sleep ใช้ endpoint ต่างจาก steps/heart-rate:
+//    steps, heart-rate → POST .../dataPoints:dailyRollUp
+//    sleep             → GET  .../dataPoints:reconcile  (dailyRollUp ไม่รองรับ)
 
 import axios from "axios";
 import {
   DailyRollUpRequest,
   DailyRollUpResponse,
-  DailyRollupDataPoint,
+  SleepReconcileResponse,
   HealthData,
 } from "./types";
 
@@ -117,6 +121,39 @@ async function fetchDailyRollUp(
   }
 }
 
+/**
+ * ดึงข้อมูล Sleep ผ่าน reconcile endpoint (GET)
+ *
+ * Endpoint: GET /v4/users/me/dataTypes/sleep/dataPoints:reconcile
+ * Filter:   civil_time >= "YYYY-MM-DD" AND civil_time < "YYYY-MM-DD+1"
+ *
+ * หมายเหตุ: sleep ไม่รองรับ dailyRollUp — ต้องใช้ reconcile แทน
+ * Allowed actions: list, get, reconcile, create, update, batchDelete
+ */
+async function fetchSleepReconcile(
+  accessToken: string,
+  startDate: string,  // "YYYY-MM-DD"
+  endDate: string     // "YYYY-MM-DD" วันถัดไป (exclusive)
+): Promise<SleepReconcileResponse> {
+  const url = `${HEALTH_BASE}/users/me/dataTypes/sleep/dataPoints:reconcile`;
+
+  // AIP-160 filter syntax สำหรับ civil time (ไม่ใช่ UTC timestamp)
+  const filter = `civil_time >= "${startDate}" AND civil_time < "${endDate}"`;
+
+  try {
+    const response = await axios.get<SleepReconcileResponse>(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: {
+        filter,
+        pageSize: 25, // max สำหรับ sleep
+      },
+    });
+    return response.data;
+  } catch (error) {
+    handleApiError("reconcile/sleep", error);
+  }
+}
+
 // ─── Parsers ─────────────────────────────────────────────────────────────────
 
 function parseSteps(data: DailyRollUpResponse): number {
@@ -164,16 +201,29 @@ function parseHeartRate(data: DailyRollUpResponse): HeartRateStats {
   };
 }
 
-function parseSleepMinutes(data: DailyRollUpResponse): number {
-  let total = 0;
+function parseSleepMinutes(data: SleepReconcileResponse): number {
+  let totalMs = 0;
+
   for (const point of data.dataPoints ?? []) {
-    // minutesInSleepPeriod = เวลาอยู่บนเตียงรวม (รวม awake)
-    // minutesAsleep        = เวลาที่หลับจริง (ไม่รวม awake)
-    // เราใช้ minutesInSleepPeriod เพื่อให้ตรงกับ "ระยะเวลาการนอนหลับ"
-    const minutes = point.sleep?.summary?.minutesInSleepPeriod;
-    if (minutes) total += parseInt(minutes, 10);
+    // Priority 1: ใช้ summary.minutesInSleepPeriod ถ้ามี
+    const minutesStr = point.sleep?.summary?.minutesInSleepPeriod
+      ?? point.sleep?.summary?.minutesAsleep;
+    if (minutesStr) {
+      totalMs += parseInt(minutesStr, 10) * 60_000;
+      continue;
+    }
+
+    // Priority 2: คำนวณจาก startTime/endTime ของ session
+    if (point.startTime && point.endTime) {
+      const start = new Date(point.startTime).getTime();
+      const end = new Date(point.endTime).getTime();
+      if (!isNaN(start) && !isNaN(end) && end > start) {
+        totalMs += end - start;
+      }
+    }
   }
-  return total;
+
+  return Math.round(totalMs / 60_000); // ms → นาที
 }
 
 function formatSleepDuration(minutes: number): string {
@@ -196,6 +246,11 @@ export async function fetchYesterdayHealthData(
   const { year, month, day, dateLabel } = getYesterdayDate(timezone);
   const range = buildDayRange(year, month, day);
 
+  // สร้าง date string สำหรับ sleep reconcile filter
+  const startDateStr = dateLabel; // "YYYY-MM-DD"
+  const nextDay = buildNextDay(year, month, day);
+  const endDateStr = `${nextDay.date.year}-${String(nextDay.date.month).padStart(2, "0")}-${String(nextDay.date.day).padStart(2, "0")}`;
+
   console.log(
     `📅 ดึงข้อมูลวันที่: ${dateLabel} (${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")} civil time)`
   );
@@ -203,14 +258,14 @@ export async function fetchYesterdayHealthData(
 
   // ─── ดึงทีละ call เพื่อให้ log บอกได้ว่า call ไหนพัง ─────────────────────
 
-  console.log("  ├─ 1/3 ก้าวเดิน (steps)...");
+  console.log("  ├─ 1/3 ก้าวเดิน (steps → dailyRollUp)...");
   const stepsData = await fetchDailyRollUp(accessToken, "steps", range);
 
-  console.log("  ├─ 2/3 อัตราการเต้นหัวใจ (heart-rate)...");
+  console.log("  ├─ 2/3 อัตราการเต้นหัวใจ (heart-rate → dailyRollUp)...");
   const heartRateData = await fetchDailyRollUp(accessToken, "heart-rate", range);
 
-  console.log("  └─ 3/3 การนอนหลับ (sleep)...");
-  const sleepData = await fetchDailyRollUp(accessToken, "sleep", range);
+  console.log("  └─ 3/3 การนอนหลับ (sleep → reconcile)...");
+  const sleepData = await fetchSleepReconcile(accessToken, startDateStr, endDateStr);
 
   // ─── แปลงข้อมูล ────────────────────────────────────────────────────────
 

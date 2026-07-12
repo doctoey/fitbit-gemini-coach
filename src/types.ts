@@ -80,6 +80,29 @@ export interface DailyRollUpResponse {
   nextPageToken?: string;
 }
 
+/**
+ * Response จาก reconcile endpoint — ใช้กับ sleep
+ * sleep ไม่รองรับ dailyRollUp — ต้องดึงผ่าน reconcile (GET)
+ */
+export interface SleepDataPoint {
+  name?: string;
+  startTime?: string;  // RFC 3339 datetime
+  endTime?: string;    // RFC 3339 datetime
+  sleep?: {
+    summary?: {
+      minutesAsleep?: string;        // int64 string
+      minutesInSleepPeriod?: string; // int64 string
+      minutesAwake?: string;         // int64 string
+    };
+  };
+  [key: string]: unknown;
+}
+
+export interface SleepReconcileResponse {
+  dataPoints: SleepDataPoint[];
+  nextPageToken?: string;
+}
+
 // ─── Health Summary ──────────────────────────────────────────────────────────
 
 /** ข้อมูลสุขภาพรวมที่ดึงมาจาก Google Health API v4 */
@@ -95,7 +118,7 @@ export interface HealthData {
   rawData: {                      // JSON ดิบสำหรับส่งให้ Gemini
     steps: DailyRollUpResponse;
     heartRate: DailyRollUpResponse;
-    sleep: DailyRollUpResponse;
+    sleep: SleepReconcileResponse; // ใช้ reconcile endpoint เพราะ sleep ไม่รองรับ dailyRollUp
   };
 }
 
