@@ -2,6 +2,9 @@
 # ─────────────────────────────────────────────────────────────────
 # AI Health Coach — GitHub Actions Scheduled Workflow
 # รันทุกวัน 09:00 น. เวลาไทย (UTC+7 = 02:00 UTC)
+#
+# ⚠️  GitHub cron อาจ delay ได้หลายชั่วโมงในช่วง load สูง
+# ⚠️  Repo ที่ไม่มี push นาน 60 วัน จะถูก disable scheduled workflow อัตโนมัติ
 # ─────────────────────────────────────────────────────────────────
 
 name: 🏃 Daily Health Coach Report
@@ -10,7 +13,7 @@ on:
   # ─── Scheduled trigger ────────────────────────────────────────
   schedule:
     # 09:00 Asia/Bangkok (UTC+7) = 02:00 UTC
-    # Format: นาที ชั่วโมง วัน เดือน วันในสัปดาห์
+    # หมายเหตุ: GitHub ไม่รับประกันเวลาแน่นอน อาจ delay ได้ถึง 1 ชั่วโมง
     - cron: "0 2 * * *"
 
   # ─── Manual trigger (ทดสอบรันตามต้องการ) ─────────────────────
@@ -21,10 +24,17 @@ on:
         required: false
         default: "Manual test run"
 
+  # ─── Push trigger: push ไปที่ branch 'test' เพื่อทดสอบ ────────
+  # วิธีใช้: git push origin main:test
+  # จะ trigger workflow ทันที ไม่ต้องรอ cron
+  push:
+    branches:
+      - test
+
 # ─── Concurrency: ป้องกัน workflow ซ้อนกันรัน ───────────────────
 concurrency:
   group: health-coach-daily
-  cancel-in-progress: false
+  cancel-in-progress: false   # ไม่ยกเลิก run ที่กำลังทำงานอยู่
 
 jobs:
   run-health-coach:
@@ -38,51 +48,108 @@ jobs:
         uses: actions/checkout@v4
 
       # ─── Step 2: Setup Node.js ──────────────────────────────────
-      - name: ⚙️ Setup Node.js 20
+      - name: ⚙️ Setup Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-          cache: "npm"   # cache node_modules ให้เร็วขึ้น
+          node-version: "22"   # ใช้ LTS ล่าสุด (v20 deprecated แล้ว)
+          cache: "npm"         # cache node_modules ให้เร็วขึ้น
 
       # ─── Step 3: Install dependencies ───────────────────────────
       - name: 📦 Install dependencies
-        run: npm ci    # ใช้ ci แทน install เพื่อ reproducible build
+        run: npm ci  # ใช้ ci แทน install เพื่อ reproducible build
 
       # ─── Step 4: Type-check & Build TypeScript ──────────────────
       - name: 🔨 Build TypeScript
         run: npm run build
 
-      # ─── Step 5: Run Health Coach ───────────────────────────────
+      # ─── Step 5: Notify Discord — Workflow Started ──────────────
+      # ส่งก่อนรัน เพื่อยืนยันว่า cron ทำงานจริง
+      - name: 📣 Notify Discord — Starting
+        run: |
+          TRIGGER="${{ github.event_name }}"
+          if [ "$TRIGGER" = "schedule" ]; then
+            TRIGGER_LABEL="⏰ ตั้งเวลาอัตโนมัติ (09:00 น.)"
+          elif [ "$TRIGGER" = "workflow_dispatch" ]; then
+            TRIGGER_LABEL="🖱️ รันด้วยมือ: ${{ github.event.inputs.reason }}"
+          else
+            TRIGGER_LABEL="🔀 Push to branch: ${{ github.ref_name }}"
+          fi
+
+          curl -s -X POST "${{ secrets.DISCORD_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"username\": \"🏃 AI Health Coach\",
+              \"embeds\": [{
+                \"title\": \"⏳ กำลังดึงข้อมูลและวิเคราะห์...\",
+                \"description\": \"Workflow เริ่มทำงานแล้ว รอสักครู่นะครับ\",
+                \"color\": 3447003,
+                \"fields\": [
+                  { \"name\": \"สาเหตุที่รัน\", \"value\": \"${TRIGGER_LABEL}\", \"inline\": true },
+                  { \"name\": \"Run #\", \"value\": \"${{ github.run_number }}\", \"inline\": true }
+                ],
+                \"footer\": { \"text\": \"${{ github.repository }}\" }
+              }]
+            }"
+
+      # ─── Step 6: Run Health Coach ───────────────────────────────
       - name: 🏃 Run AI Health Coach
+        id: health_coach
         run: npm start
         env:
           # ── Google OAuth ─────────────────────────────────────────
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          GOOGLE_CLIENT_ID:      ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET:  ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN:  ${{ secrets.GOOGLE_REFRESH_TOKEN }}
 
           # ── Gemini AI ────────────────────────────────────────────
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY:        ${{ secrets.GEMINI_API_KEY }}
 
           # ── Discord ──────────────────────────────────────────────
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_WEBHOOK_URL:   ${{ secrets.DISCORD_WEBHOOK_URL }}
 
           # ── App Config ───────────────────────────────────────────
-          TIMEZONE: "Asia/Bangkok"
-          NODE_ENV: "production"
+          TIMEZONE:  "Asia/Bangkok"
+          NODE_ENV:  "production"
 
-      # ─── Step 6: Notify on failure ──────────────────────────────
-      - name: 🚨 Notify Discord on workflow failure
+      # ─── Step 7: GitHub Step Summary ────────────────────────────
+      # แสดงผลสรุปใน Actions UI → Actions tab → เลือก run → Summary
+      - name: 📋 Write Job Summary
+        if: always()
+        run: |
+          STATUS="${{ steps.health_coach.outcome }}"
+          if [ "$STATUS" = "success" ]; then
+            ICON="✅"
+          else
+            ICON="❌"
+          fi
+
+          echo "## ${ICON} AI Health Coach — Run #${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | ${STATUS} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Trigger | ${{ github.event_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | ${{ github.ref_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "[🔗 View full log](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+
+      # ─── Step 8: Notify on failure ──────────────────────────────
+      - name: 🚨 Notify Discord on failure
         if: failure()
         run: |
           curl -s -X POST "${{ secrets.DISCORD_WEBHOOK_URL }}" \
             -H "Content-Type: application/json" \
-            -d '{
-              "username": "🏃 AI Health Coach",
-              "embeds": [{
-                "title": "⚠️ GitHub Actions Workflow ล้มเหลว",
-                "description": "Workflow รันไม่สำเร็จ กรุณาตรวจสอบ [Actions log](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})",
-                "color": 15158332,
-                "footer": { "text": "Run #${{ github.run_number }} • ${{ github.repository }}" }
+            -d "{
+              \"username\": \"🏃 AI Health Coach\",
+              \"embeds\": [{
+                \"title\": \"🚨 Workflow ล้มเหลว! Run #${{ github.run_number }}\",
+                \"description\": \"กรุณาตรวจสอบ [Actions log](<https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}>)\",
+                \"color\": 15158332,
+                \"fields\": [
+                  { \"name\": \"Trigger\", \"value\": \"${{ github.event_name }}\", \"inline\": true },
+                  { \"name\": \"Branch\", \"value\": \"${{ github.ref_name }}\", \"inline\": true }
+                ],
+                \"footer\": { \"text\": \"${{ github.repository }}\" }
               }]
-            }'
+            }"
