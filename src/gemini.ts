@@ -113,8 +113,10 @@ ${rawJson}
 - ใช้ **bold** และ bullet points ได้ตามปกติ`;
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
- * ส่งข้อมูลสุขภาพให้ Gemini วิเคราะห์
+ * ส่งข้อมูลสุขภาพให้ Gemini วิเคราะห์ (พร้อมกลไก Retry เผื่อเจอ Error 503 / 429)
  * คืน string ที่พร้อมส่งไป Discord
  */
 export async function analyzeWithGemini(health: HealthData): Promise<string> {
@@ -140,7 +142,6 @@ export async function analyzeWithGemini(health: HealthData): Promise<string> {
       topP: 0.95,
       maxOutputTokens: 1024,
       // Disable thinking เพื่อลด latency และค่าใช้จ่าย
-      // Health coaching ไม่จำเป็นต้องใช้ thinking mode
       thinkingConfig: { thinkingBudget: 0 },
     },
   };
@@ -149,17 +150,42 @@ export async function analyzeWithGemini(health: HealthData): Promise<string> {
   const urlForLog = `${GEMINI_BASE}/${GEMINI_MODEL}:generateContent?key=***`;
   console.log(`   URL: ${urlForLog}`);
 
+  const MAX_RETRIES = 3;
+  let delay = 2000; // เริ่มต้นหน่วงเวลา 2 วินาที
   let response;
-  try {
-    response = await axios.post<GeminiResponse>(url, requestBody, {
-      headers: { "Content-Type": "application/json" },
-    });
-  } catch (err) {
-    if (axios.isAxiosError(err) && err.response) {
-      console.error(`❌ Gemini Error ${err.response.status}:`);
-      console.error("   Detail:", JSON.stringify(err.response.data, null, 2));
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      response = await axios.post<GeminiResponse>(url, requestBody, {
+        headers: { "Content-Type": "application/json" },
+      });
+      // ถ้าผ่านให้ออกลูปทันที
+      break;
+    } catch (err) {
+      const isAxiosError = axios.isAxiosError(err);
+      const status = isAxiosError ? err.response?.status : null;
+      
+      console.warn(`⚠️ [Attempt ${attempt}/${MAX_RETRIES}] Gemini API ขัดข้อง (Status: ${status ?? "Unknown"})`);
+
+      if (isAxiosError && err.response) {
+        console.error("   Detail:", JSON.stringify(err.response.data, null, 2));
+      }
+
+      // ถ้าเป็นความผิดพลาดชั่วคราว (เช่น 503 หรือ 429) และยังไม่ครบจำนวนรอบ ให้ลองใหม่
+      if ((status === 503 || status === 429 || !status) && attempt < MAX_RETRIES) {
+        console.log(`   กำลังลองใหม่ในอีก ${delay / 1000} วินาที...`);
+        await sleep(delay);
+        delay *= 2; // เพิ่มเวลารอเป็น 2 เท่า (Exponential Backoff)
+        continue;
+      }
+
+      // ถ้าเป็น error ชนิดอื่น (เช่น 400, 403, 404) หรือรันจนครบ 3 รอบแล้วยังเฟล ให้ throw error ทันที
+      throw err;
     }
-    throw err;
+  }
+
+  if (!response) {
+    throw new Error("❌ ไม่สามารถดึงข้อมูลวิเคราะห์จาก Gemini ได้สำเร็จหลังจากพยายามใหม่");
   }
 
   const candidate = response.data.candidates?.[0];
@@ -179,3 +205,4 @@ export async function analyzeWithGemini(health: HealthData): Promise<string> {
 
   return text.trim();
 }
+
