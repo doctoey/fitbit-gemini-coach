@@ -1,26 +1,32 @@
 // src/discord.ts
-// ส่งผลลัพธ์เข้า Discord Webhook พร้อม Markdown + Embed สวยงาม
+// ส่งผลลัพธ์เข้า Discord Webhook พร้อม Embed สวยงาม
+//
+// โครงสร้าง Discord Embed:
+//   description  → Stats สั้นๆ (ก้าว / นอน / หัวใจ) ~150 chars เสมอ
+//   fields[]     → Gemini analysis แบ่งเป็น chunk ≤ 1024 chars โดยไม่พัง Markdown
+//
+// Discord limits:
+//   description  ≤ 4096 chars
+//   field.value  ≤ 1024 chars
+//   fields[]     ≤ 25 items per embed
+//   total embed  ≤ 6000 chars
 
 import axios from "axios";
 import { DiscordPayload, HealthData } from "./types";
 
-// สี Embed ตามเงื่อนไขสุขภาพ (decimal color)
+// ─── Colors ──────────────────────────────────────────────────────────────────
+
 const COLOR = {
   EXCELLENT: 0x2ecc71, // เขียว
-  GOOD: 0x3498db,      // ฟ้า
-  AVERAGE: 0xf39c12,   // เหลือง
-  POOR: 0xe74c3c,      // แดง
+  GOOD:      0x3498db, // ฟ้า
+  AVERAGE:   0xf39c12, // เหลือง
+  POOR:      0xe74c3c, // แดง
 };
 
-/** เลือกสีตามภาพรวมสุขภาพ */
 function pickColor(health: HealthData): number {
   const score =
     (health.stepGoalPercent >= 100 ? 2 : health.stepGoalPercent >= 50 ? 1 : 0) +
-    (health.sleepDurationMinutes >= 420
-      ? 2
-      : health.sleepDurationMinutes >= 300
-      ? 1
-      : 0) +
+    (health.sleepDurationMinutes >= 420 ? 2 : health.sleepDurationMinutes >= 300 ? 1 : 0) +
     (health.heartRateAvg >= 60 && health.heartRateAvg <= 100 ? 2 : 1);
 
   if (score >= 5) return COLOR.EXCELLENT;
@@ -29,14 +35,14 @@ function pickColor(health: HealthData): number {
   return COLOR.POOR;
 }
 
-/** สร้าง stats bar แบบ text progress bar */
-function progressBar(percent: number, total: number = 10): string {
+// ─── Stats Section ────────────────────────────────────────────────────────────
+
+function progressBar(percent: number, total = 10): string {
   const filled = Math.min(Math.round((percent / 100) * total), total);
-  const empty = total - filled;
-  return "█".repeat(filled) + "░".repeat(empty) + ` ${percent}%`;
+  return "█".repeat(filled) + "░".repeat(total - filled) + ` ${percent}%`;
 }
 
-/** สรุปข้อมูล stats เป็น text สั้นๆ สำหรับ Embed description header */
+/** สร้าง stats header สั้นๆ สำหรับ embed description (~150 chars เสมอ) */
 function buildStatsSection(health: HealthData): string {
   const stepBar = progressBar(Math.min(health.stepGoalPercent, 100));
   const sleepHr = (health.sleepDurationMinutes / 60).toFixed(1);
@@ -53,14 +59,82 @@ function buildStatsSection(health: HealthData): string {
     ``,
     `**❤️ อัตราการเต้นหัวใจ**`,
     `เฉลี่ย **${health.heartRateAvg}** bpm | ต่ำสุด ${health.heartRateMin} | สูงสุด ${health.heartRateMax}`,
-    ``,
-    `---`,
-    ``,
   ].join("\n");
 }
 
+// ─── Text Chunker ─────────────────────────────────────────────────────────────
+
 /**
- * ส่งรายงานสุขภาพพร้อม AI analysis เข้า Discord Webhook
+ * แบ่ง text ยาวเป็น chunk ≤ maxLen chars
+ * พยายามตัดที่ขอบ paragraph (\n\n) ก่อน ถ้าไม่ได้ก็ตัดที่ \n แล้วค่อยตัดดื้อๆ
+ */
+function splitIntoChunks(text: string, maxLen = 1024): string[] {
+  if (text.length <= maxLen) return [text.trim()];
+
+  const chunks: string[] = [];
+  let remaining = text.trim();
+
+  while (remaining.length > 0) {
+    if (remaining.length <= maxLen) {
+      chunks.push(remaining);
+      break;
+    }
+
+    const window = remaining.slice(0, maxLen);
+
+    // ลองตัดที่ \n\n (paragraph break) ก่อน
+    const paraBreak = window.lastIndexOf("\n\n");
+    if (paraBreak > maxLen * 0.5) {
+      chunks.push(remaining.slice(0, paraBreak).trim());
+      remaining = remaining.slice(paraBreak).trim();
+      continue;
+    }
+
+    // ลองตัดที่ \n (line break)
+    const lineBreak = window.lastIndexOf("\n");
+    if (lineBreak > maxLen * 0.5) {
+      chunks.push(remaining.slice(0, lineBreak).trim());
+      remaining = remaining.slice(lineBreak).trim();
+      continue;
+    }
+
+    // ตัดดื้อๆ
+    chunks.push(window.trim());
+    remaining = remaining.slice(maxLen).trim();
+  }
+
+  return chunks.filter((c) => c.length > 0);
+}
+
+// ─── Discord Embed Fields ─────────────────────────────────────────────────────
+
+interface EmbedField {
+  name: string;
+  value: string;
+  inline?: boolean;
+}
+
+/**
+ * แปลง Gemini analysis text เป็น embed fields
+ * ใช้ zero-width space (\u200b) เป็นชื่อ field continuation
+ */
+function buildAnalysisFields(geminiAnalysis: string): EmbedField[] {
+  const chunks = splitIntoChunks(geminiAnalysis, 1024);
+  return chunks.map((chunk, i) => ({
+    name: i === 0 ? "🤖 วิเคราะห์โดย Gemini" : "\u200b",
+    value: chunk,
+    inline: false,
+  }));
+}
+
+// ─── Main Export ──────────────────────────────────────────────────────────────
+
+/**
+ * ส่งรายงานสุขภาพพร้อม Gemini analysis เข้า Discord Webhook
+ *
+ * โครงสร้าง:
+ *   embed.description = stats summary (สั้น, ปลอดภัยจาก limit เสมอ)
+ *   embed.fields[]    = Gemini analysis (แบ่ง chunk อัตโนมัติ ≤ 1024 chars/field)
  */
 export async function sendToDiscord(
   health: HealthData,
@@ -73,14 +147,8 @@ export async function sendToDiscord(
 
   console.log("📨 กำลังส่งรายงานเข้า Discord...");
 
-  const statsSection = buildStatsSection(health);
-  const fullDescription = statsSection + geminiAnalysis;
-
-  // Discord embed description มีขีดจำกัด 4096 ตัวอักษร
-  const description =
-    fullDescription.length > 4096
-      ? fullDescription.slice(0, 4090) + "\n..."
-      : fullDescription;
+  const description = buildStatsSection(health);
+  const fields = buildAnalysisFields(geminiAnalysis);
 
   const payload: DiscordPayload = {
     username: "🏃 AI Health Coach",
@@ -89,6 +157,7 @@ export async function sendToDiscord(
         title: "🌅 รายงานสุขภาพประจำวัน",
         description,
         color: pickColor(health),
+        fields,
         footer: {
           text: `วิเคราะห์โดย Gemini AI • ข้อมูลจาก Google Fit`,
         },
@@ -109,7 +178,7 @@ export async function sendToDiscord(
  */
 export async function sendErrorToDiscord(error: Error): Promise<void> {
   const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
-  if (!webhookUrl) return; // ถ้าไม่มี webhook ก็ไม่ส่ง
+  if (!webhookUrl) return;
 
   try {
     const payload: DiscordPayload = {
@@ -124,7 +193,7 @@ export async function sendErrorToDiscord(error: Error): Promise<void> {
             `\`\`\``,
             `กรุณาตรวจสอบ log และ environment variables`,
           ].join("\n"),
-          color: 0xe74c3c, // แดง
+          color: 0xe74c3c,
           timestamp: new Date().toISOString(),
         },
       ],
@@ -134,7 +203,6 @@ export async function sendErrorToDiscord(error: Error): Promise<void> {
       headers: { "Content-Type": "application/json" },
     });
   } catch {
-    // Suppress error ใน error handler
     console.error("⚠️ ส่ง error notification เข้า Discord ไม่สำเร็จ");
   }
 }
