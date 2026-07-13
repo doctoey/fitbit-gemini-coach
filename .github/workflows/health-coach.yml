@@ -58,11 +58,15 @@ jobs:
       - name: 📦 Install dependencies
         run: npm ci  # ใช้ ci แทน install เพื่อ reproducible build
 
-      # ─── Step 4: Type-check & Build TypeScript ──────────────────
+      # ─── Step 4: Run Unit Tests ─────────────────────────────────
+      - name: 🧪 Run Unit Tests
+        run: npm test
+
+      # ─── Step 5: Type-check & Build TypeScript ──────────────────
       - name: 🔨 Build TypeScript
         run: npm run build
 
-      # ─── Step 5: Run Health Coach ───────────────────────────────
+      # ─── Step 6: Run Health Coach ───────────────────────────────
       - name: 🏃 Run AI Health Coach
         id: health_coach
         run: npm start
