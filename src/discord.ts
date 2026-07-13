@@ -100,13 +100,6 @@ export async function sendToDiscord(
   const fullDescription = statsSection + geminiAnalysis;
   const description = safeTruncate(fullDescription, 4096);
 
-  // หาวันที่และเวลาปัจจุบันของไทยเพื่อแสดงใน footer
-  const bangkokTimeStr = new Date().toLocaleString("th-TH", {
-    timeZone: "Asia/Bangkok",
-    dateStyle: "medium",
-    timeStyle: "short",
-  }) + " น.";
-
   const payload: DiscordPayload = {
     username: "🏃 AI Health Coach",
     embeds: [
@@ -115,12 +108,13 @@ export async function sendToDiscord(
         description,
         color: pickColor(health),
         footer: {
-          text: `วิเคราะห์โดย Gemini AI • ข้อมูลจาก Google Fit • อัปเดตเมื่อ ${bangkokTimeStr}`,
+          text: `วิเคราะห์โดย Gemini AI • ข้อมูลจาก Google Fit`,
         },
         timestamp: new Date().toISOString(),
       },
     ],
   };
+
 
   await axios.post(webhookUrl, payload, {
     headers: { "Content-Type": "application/json" },
