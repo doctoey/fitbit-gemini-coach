@@ -38,10 +38,8 @@ function progressBar(percent: number, total = 10): string {
   return "█".repeat(filled) + "░".repeat(total - filled) + ` ${percent}%`;
 }
 
-/** สร้าง stats header สั้นๆ สำหรับ embed description */
 function buildStatsSection(health: HealthData): string {
   const stepBar = progressBar(Math.min(health.stepGoalPercent, 100));
-  const sleepHr = (health.sleepDurationMinutes / 60).toFixed(1);
 
   return [
     `📅 **รายงานสุขภาพประจำวัน: ${health.date}**`,
@@ -52,12 +50,13 @@ function buildStatsSection(health: HealthData): string {
     `└─ **${health.steps.toLocaleString()}** / 10,000 ก้าว`,
     ``,
     `**😴 การนอนหลับพักผ่อน**`,
-    `└─ **${health.sleepDurationFormatted}** (${sleepHr} ชม.)`,
+    `└─ **${health.sleepDurationFormatted}**`,
     ``,
     `**❤️ อัตราการเต้นของหัวใจ**`,
     `└─ เฉลี่ย **${health.heartRateAvg}** bpm (ช่วง: ${health.heartRateMin} - ${health.heartRateMax} bpm)`,
     ``,
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+
     `🤖 **บทวิเคราะห์และแนะนำโดย AI Coach**`,
     ``
   ].join("\n");
