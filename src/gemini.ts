@@ -74,6 +74,9 @@ function buildPrompt(health: HealthData): string {
       steps: health.rawData.steps,
       heartRate: health.rawData.heartRate,
       sleep: health.rawData.sleep,
+      totalCalories: health.rawData.totalCalories,
+      activeZoneMinutes: health.rawData.activeZoneMinutes,
+      restingHeartRate: health.rawData.restingHeartRate,
     },
     null,
     2,
@@ -88,7 +91,10 @@ function buildPrompt(health: HealthData): string {
 ## ข้อมูลสรุป
 - 👟 จำนวนก้าว: ${health.steps.toLocaleString()} ก้าว (${health.stepGoalPercent}% ของเป้าหมาย 10,000 ก้าว)
 - 😴 เวลานอน: ${health.sleepDurationFormatted}
-- ❤️  อัตราการเต้นหัวใจเฉลี่ย: ${health.heartRateAvg} bpm (ต่ำสุด ${health.heartRateMin} | สูงสุด ${health.heartRateMax})
+- ❤️ อัตราการเต้นหัวใจเฉลี่ย: ${health.heartRateAvg} bpm (ต่ำสุด ${health.heartRateMin} | สูงสุด ${health.heartRateMax})
+- 🔥 พลังงานที่เผาผลาญ: ${health.totalCalories} kcal
+- ⚡ Active Zone Minutes: ${health.activeZoneMinutesTotal} นาที (Fat Burn: ${health.activeZoneMinutesDetails.fatBurn} นาที, Cardio: ${health.activeZoneMinutesDetails.cardio} นาที, Peak: ${health.activeZoneMinutesDetails.peak} นาที)
+- 💓 ช่วงชีพจรขณะพัก (Resting HR Range): ${health.restingHeartRateMin} - ${health.restingHeartRateMax} bpm
 
 ## ช่วงเวลานอนหลับ (เวลาประเทศไทย GMT+7 แล้ว — ใช้ข้อมูลชุดนี้ในการวิเคราะห์)
 ${sleepFormatted}
@@ -104,7 +110,7 @@ ${rawJson}
 
 1. **คำทักทาย**: ทักทายอย่างสุภาพและเปิดประเด็นเข้าสู่การดูรายงานของเมื่อวานอย่างอบอุ่นและกระชับ (เช่น "สวัสดีครับ มาดูภาพรวมสุขภาพของเมื่อวานกันนะครับ" หรือ "สวัสดีครับ วันนี้เรามาดูรายละเอียดสุขภาพของเมื่อวานกันครับ")
 2. **จุดที่ทำได้ดี**: ชื่นชมพฤติกรรมที่ดีอย่างสมเหตุสมผลและสั้นกระชับ
-3. **การวิเคราะห์**: อธิบายสถิติตัวชี้วัด (ก้าวเดิน, การนอนหลับ, ชีพจร) ด้วยภาษาที่สั้นกระชับ เข้าใจง่าย และตรงประเด็น
+3. **การวิเคราะห์**: อธิบายสถิติตัวชี้วัด (ก้าวเดิน, การนอนหลับ, ชีพจร, แคลอรี่, Active Zone Minutes, ชีพจรขณะพัก) ด้วยภาษาที่สั้นกระชับ เข้าใจง่าย และตรงประเด็น
 4. **คำแนะนำ**: แนะนำสิ่งที่ควรทำในวันนี้ 2-3 ข้อสั้นๆ ที่ทำได้จริง
 5. **กำลังใจ**: ปิดท้ายด้วยการให้กำลังใจสั้นๆ อย่างจริงใจ
 
@@ -118,19 +124,72 @@ ${rawJson}
 - ตอบเฉพาะเนื้อหาวิเคราะห์ ห้ามใส่หัวข้อหรือ markdown ที่ไม่จำเป็น (เช่น ห้ามใส่พาดหัวบิ๊กๆ หรือเครื่องหมายขีดคั่นซ้ำซ้อน เพราะระบบมีโครงสร้างหลักอยู่แล้ว)`;
 }
 
+function buildWeeklyPrompt(weeklyData: HealthData[]): string {
+  const dateRangeStr = `${weeklyData[0].date} ถึง ${weeklyData[weeklyData.length - 1].date}`;
+
+  const dailySummaryTable = [
+    "| วันที่ | จำนวนก้าว | เวลานอน | ชีพจรเฉลี่ย (ช่วง) | ชีพจรขณะพัก (RHR) | แคลอรี่ (kcal) | Active Mins |",
+    "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+    ...weeklyData.map((d) => {
+      const rhrStr =
+        d.restingHeartRateMin > 0
+          ? `${d.restingHeartRateMin}-${d.restingHeartRateMax} bpm`
+          : "ไม่มีข้อมูล";
+      return `| ${d.date} | ${d.steps.toLocaleString()} ก้าว (${d.stepGoalPercent}%) | ${d.sleepDurationFormatted} | ${d.heartRateAvg} bpm (${d.heartRateMin}-${d.heartRateMax}) | ${rhrStr} | ${d.totalCalories} | ${d.activeZoneMinutesTotal} นาที |`;
+    }),
+  ].join("\n");
+
+  const totalSteps = weeklyData.reduce((sum, d) => sum + d.steps, 0);
+  const avgSteps = Math.round(totalSteps / weeklyData.length);
+  const totalActiveMins = weeklyData.reduce(
+    (sum, d) => sum + d.activeZoneMinutesTotal,
+    0,
+  );
+  const totalCalories = weeklyData.reduce((sum, d) => sum + d.totalCalories, 0);
+  const avgSleepMins = Math.round(
+    weeklyData.reduce((sum, d) => sum + d.sleepDurationMinutes, 0) /
+      weeklyData.length,
+  );
+  const avgSleepFormatted = `${Math.floor(avgSleepMins / 60)} ชั่วโมง ${avgSleepMins % 60} นาที`;
+
+  return `คุณคือผู้เชี่ยวชาญด้านสุขภาพและที่ปรึกษาส่วนตัว (Health Coach) ที่ให้คำแนะนำอย่างอบอุ่น สุภาพ และเป็นมิตร
+
+ต่อไปนี้คือข้อมูลสุขภาพโดยรวมรายสัปดาห์ของผู้ใช้ (${dateRangeStr}):
+
+## ตารางข้อมูลรายวัน
+${dailySummaryTable}
+
+## สรุปรวมรายสัปดาห์
+- 👟 ก้าวเดินเฉลี่ยต่อวัน: ${avgSteps.toLocaleString()} ก้าว
+- 😴 นอนหลับเฉลี่ยต่อวัน: ${avgSleepFormatted}
+- ⚡ Active Zone Minutes รวมทั้งสัปดาห์: ${totalActiveMins} นาที
+- 🔥 เผาผลาญพลังงานรวมทั้งสัปดาห์: ${totalCalories.toLocaleString()} kcal
+
+## งานของคุณ
+กรุณาวิเคราะห์แนวโน้มสุขภาพของผู้ใช้ตลอดสัปดาห์ที่ผ่านมา และเขียนรายงานสรุปภาพรวมรายสัปดาห์ (Weekly Report) ด้วยน้ำเสียงที่สุภาพ อบอุ่น เป็นมิตร และเป็นมืออาชีพ โดยเน้นความ **กระชับ ตรงประเด็น** และมีโครงสร้างดังนี้:
+
+1. **ภาพรวมสัปดาห์นี้**: สรุปภาพรวมสัปดาห์สั้นๆ (เช่น สัปดาห์นี้สุขภาพค่อนข้างคงที่หรือมีความแอคทีฟขึ้น)
+2. **จุดเด่น / พัฒนาการที่ดี**: ชื่นชมพฤติกรรมที่ดีหรือเป้าหมายที่ทำสำเร็จในสัปดาห์นี้ เช่น เดินครบเป้ากี่วัน หรือเวลานอนเฉลี่ยได้มาตรฐาน
+3. **แนวโน้มและวิเคราะห์**: วิเคราะห์ความสัมพันธ์ของข้อมูล (เช่น วันที่นอนน้อย ชีพจรขณะพักสูงขึ้น หรือก้าวเดินลดลงอย่างเห็นได้ชัด)
+4. **คำแนะนำ/เป้าหมายสำหรับสัปดาห์ถัดไป**: ให้คำแนะนำหรือเป้าหมายท้าทายเล็กๆ 2-3 ข้อ เพื่อรักษามาตรฐานหรือปรับปรุงในจุดที่ยังขาด
+5. **คำลงท้ายและกำลังใจ**: คำพูดปิดท้ายให้กำลังใจสำหรับสัปดาห์ใหม่สั้นๆ อย่างจริงใจ
+
+**ข้อกำหนดที่เข้มงวด:**
+- **ห้ามใช้คำว่า "คุณลูกค้า" เด็ดขาด** ให้ใช้คำว่า "คุณ" หรือละเว้นสรรพนาม
+- ห้ามใช้คำลงท้ายหรือคำอุทานที่ดูฝืนหรือเป็นวัยรุ่นเกินไป เช่น "นะค้าบ", "เย้", "โย่ว"
+- เขียนให้ตรงประเด็นและสั้นกระชับ ลดการใช้น้ำและคำเยิ่นเย้อ
+- ใช้อิโมจิประกอบได้เล็กน้อยเพื่อความสบายตา
+- ความยาวรวมประมาณ 200-300 คำ
+- ตอบเฉพาะเนื้อหาวิเคราะห์ ห้ามใส่หัวข้อหรือ markdown ที่ไม่จำเป็น (เช่น ห้ามใส่พาดหัวบิ๊กๆ หรือเครื่องหมายขีดคั่นซ้ำซ้อน เพราะระบบมีโครงสร้างหลักอยู่แล้ว)`;
+}
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/**
- * ส่งข้อมูลสุขภาพให้ Gemini วิเคราะห์ (พร้อมกลไก Retry เผื่อเจอ Error 503 / 429)
- * คืน string ที่พร้อมส่งไป Discord
- */
-export async function analyzeWithGemini(health: HealthData): Promise<string> {
+async function callGeminiApi(prompt: string): Promise<string> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error("❌ ขาด environment variable: GEMINI_API_KEY");
   }
-
-  console.log(`🤖 กำลังส่งข้อมูลให้ Gemini (${GEMINI_MODEL}) วิเคราะห์...`);
 
   const url = `${GEMINI_BASE}/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
@@ -138,25 +197,20 @@ export async function analyzeWithGemini(health: HealthData): Promise<string> {
     contents: [
       {
         role: "user",
-        parts: [{ text: buildPrompt(health) }],
+        parts: [{ text: prompt }],
       },
     ],
     generationConfig: {
-      temperature: 0.8, // ให้ตอบสร้างสรรค์และไม่ซ้ำซาก
+      temperature: 0.8,
       topK: 40,
       topP: 0.95,
       maxOutputTokens: 1024,
-      // Disable thinking เพื่อลด latency และค่าใช้จ่าย
       thinkingConfig: { thinkingBudget: 0 },
     },
   };
 
-  // log URL เพื่อให้ debug ได้ถ้า 404 (ไม่ log apiKey จริง เพื่อ security)
-  const urlForLog = `${GEMINI_BASE}/${GEMINI_MODEL}:generateContent?key=***`;
-  console.log(`   URL: ${urlForLog}`);
-
   const MAX_RETRIES = 3;
-  let delay = 2000; // เริ่มต้นหน่วงเวลา 2 วินาที
+  let delay = 2000;
   let response;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -164,7 +218,6 @@ export async function analyzeWithGemini(health: HealthData): Promise<string> {
       response = await axios.post<GeminiResponse>(url, requestBody, {
         headers: { "Content-Type": "application/json" },
       });
-      // ถ้าผ่านให้ออกลูปทันที
       break;
     } catch (err) {
       const isAxiosError = axios.isAxiosError(err);
@@ -178,18 +231,16 @@ export async function analyzeWithGemini(health: HealthData): Promise<string> {
         console.error("   Detail:", JSON.stringify(err.response.data, null, 2));
       }
 
-      // ถ้าเป็นความผิดพลาดชั่วคราว (เช่น 503 หรือ 429) และยังไม่ครบจำนวนรอบ ให้ลองใหม่
       if (
         (status === 503 || status === 429 || !status) &&
         attempt < MAX_RETRIES
       ) {
         console.log(`   กำลังลองใหม่ในอีก ${delay / 1000} วินาที...`);
         await sleep(delay);
-        delay *= 2; // เพิ่มเวลารอเป็น 2 เท่า (Exponential Backoff)
+        delay *= 2;
         continue;
       }
 
-      // ถ้าเป็น error ชนิดอื่น (เช่น 400, 403, 404) หรือรันจนครบ 3 รอบแล้วยังเฟล ให้ throw error ทันที
       throw err;
     }
   }
@@ -216,4 +267,28 @@ export async function analyzeWithGemini(health: HealthData): Promise<string> {
   );
 
   return text.trim();
+}
+
+/**
+ * ส่งข้อมูลสุขภาพให้ Gemini วิเคราะห์รายวัน
+ */
+export async function analyzeWithGemini(health: HealthData): Promise<string> {
+  console.log(
+    `🤖 กำลังส่งข้อมูลให้ Gemini (${GEMINI_MODEL}) วิเคราะห์รายวัน...`,
+  );
+  const prompt = buildPrompt(health);
+  return callGeminiApi(prompt);
+}
+
+/**
+ * ส่งข้อมูลสุขภาพแบบ 7 วันให้ Gemini วิเคราะห์แนวโน้มรายสัปดาห์
+ */
+export async function analyzeWeeklyTrends(
+  weeklyData: HealthData[],
+): Promise<string> {
+  console.log(
+    `🤖 กำลังส่งข้อมูลให้ Gemini (${GEMINI_MODEL}) วิเคราะห์แนวโน้มรายสัปดาห์...`,
+  );
+  const prompt = buildWeeklyPrompt(weeklyData);
+  return callGeminiApi(prompt);
 }

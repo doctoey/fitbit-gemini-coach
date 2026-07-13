@@ -37,7 +37,7 @@ export interface CivilTimeInterval {
 /** Request body สำหรับ POST .../dataPoints:dailyRollUp */
 export interface DailyRollUpRequest {
   range: CivilTimeInterval;
-  windowSizeDays?: number;  // default 1
+  windowSizeDays?: number; // default 1
   pageSize?: number;
   pageToken?: string;
   dataSourceFamily?: string;
@@ -57,10 +57,28 @@ export interface HeartRateRollupValue {
 
 /** Response: Sleep summary */
 export interface SleepSummary {
-  minutesAsleep: string;         // int64 string
-  minutesInSleepPeriod: string;  // int64 string
-  minutesToFallAsleep: string;   // int64 string
-  minutesAwake: string;          // int64 string
+  minutesAsleep: string; // int64 string
+  minutesInSleepPeriod: string; // int64 string
+  minutesToFallAsleep: string; // int64 string
+  minutesAwake: string; // int64 string
+}
+
+/** Response: แคลอรี่รวม */
+export interface TotalCaloriesRollupValue {
+  kcalSum?: number;
+}
+
+/** Response: Active Zone Minutes */
+export interface ActiveZoneMinutesRollupValue {
+  sumInCardioHeartZone?: string;
+  sumInPeakHeartZone?: string;
+  sumInFatBurnHeartZone?: string;
+}
+
+/** Response: Resting Heart Rate Personal Range */
+export interface RestingHeartRatePersonalRangeRollupValue {
+  beatsPerMinuteMin?: number;
+  beatsPerMinuteMax?: number;
 }
 
 /** Data point หนึ่งก้อน จาก dailyRollUp response */
@@ -71,6 +89,9 @@ export interface DailyRollupDataPoint {
   steps?: StepsRollupValue;
   heartRate?: HeartRateRollupValue;
   sleep?: { summary?: SleepSummary };
+  totalCalories?: TotalCaloriesRollupValue;
+  activeZoneMinutes?: ActiveZoneMinutesRollupValue;
+  restingHeartRatePersonalRange?: RestingHeartRatePersonalRangeRollupValue;
   [key: string]: unknown; // รองรับ field อื่นๆ
 }
 
@@ -89,13 +110,17 @@ export interface DailyRollUpResponse {
  */
 export interface SleepDataPoint {
   name?: string;
-  startTime?: string;  // RFC 3339 datetime
-  endTime?: string;    // RFC 3339 datetime
+  startTime?: string; // RFC 3339 datetime
+  endTime?: string; // RFC 3339 datetime
   sleep?: {
+    interval?: {
+      startTime?: string;
+      endTime?: string;
+    };
     summary?: {
-      minutesAsleep?: string;        // int64 string
+      minutesAsleep?: string; // int64 string
       minutesInSleepPeriod?: string; // int64 string
-      minutesAwake?: string;         // int64 string
+      minutesAwake?: string; // int64 string
     };
   };
   [key: string]: unknown;
@@ -110,21 +135,34 @@ export interface SleepReconcileResponse {
 
 /** ข้อมูลสุขภาพรวมที่ดึงมาจาก Google Health API v4 */
 export interface HealthData {
-  date: string;                   // วันที่ เช่น "2024-07-11"
-  steps: number;                  // จำนวนก้าว
-  stepGoalPercent: number;        // เปอร์เซ็นต์เทียบกับเป้าหมาย 10,000 ก้าว
-  sleepDurationMinutes: number;   // เวลานอนรวม (นาที)
+  date: string; // วันที่ เช่น "2024-07-11"
+  steps: number; // จำนวนก้าว
+  stepGoalPercent: number; // เปอร์เซ็นต์เทียบกับเป้าหมาย 10,000 ก้าว
+  sleepDurationMinutes: number; // เวลานอนรวม (นาที)
   sleepDurationFormatted: string; // เวลานอนรูปแบบ "X ชั่วโมง Y นาที"
-  heartRateAvg: number;           // อัตราการเต้นหัวใจเฉลี่ย (bpm)
-  heartRateMin: number;           // ต่ำสุด (bpm)
-  heartRateMax: number;           // สูงสุด (bpm)
-  rawData: {                      // JSON ดิบสำหรับส่งให้ Gemini
+  heartRateAvg: number; // อัตราการเต้นหัวใจเฉลี่ย (bpm)
+  heartRateMin: number; // ต่ำสุด (bpm)
+  heartRateMax: number; // สูงสุด (bpm)
+  totalCalories: number; // แคลอรี่ทั้งหมด (kcal)
+  activeZoneMinutesTotal: number; // Active Zone Minutes รวม
+  activeZoneMinutesDetails: {
+    // Active Zone Minutes แยกโซน
+    fatBurn: number;
+    cardio: number;
+    peak: number;
+  };
+  restingHeartRateMin: number; // ช่วงชีพจรขณะพักต่ำสุด (bpm)
+  restingHeartRateMax: number; // ช่วงชีพจรขณะพักสูงสุด (bpm)
+  rawData: {
+    // JSON ดิบสำหรับส่งให้ Gemini
     steps: DailyRollUpResponse;
     heartRate: DailyRollUpResponse;
     sleep: SleepReconcileResponse; // ใช้ reconcile endpoint เพราะ sleep ไม่รองรับ dailyRollUp
+    totalCalories: DailyRollUpResponse;
+    activeZoneMinutes: DailyRollUpResponse;
+    restingHeartRate: DailyRollUpResponse;
   };
 }
-
 
 // ─── Gemini AI ───────────────────────────────────────────────────────────────
 

@@ -8,9 +8,13 @@ import dotenv from "dotenv";
 dotenv.config({ override: false }); // override: false = ไม่ทับค่าที่ runner inject มาแล้ว
 
 import { getAccessToken } from "./auth";
-import { fetchYesterdayHealthData } from "./googleFit";
-import { analyzeWithGemini } from "./gemini";
-import { sendToDiscord, sendErrorToDiscord } from "./discord";
+import { fetchYesterdayHealthData, fetchWeeklyHealthData } from "./googleFit";
+import { analyzeWithGemini, analyzeWeeklyTrends } from "./gemini";
+import {
+  sendToDiscord,
+  sendErrorToDiscord,
+  sendWeeklyReportToDiscord,
+} from "./discord";
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
@@ -27,7 +31,7 @@ function validateEnvironment(): void {
 
   if (missing.length > 0) {
     throw new Error(
-      `❌ ขาด environment variables ต่อไปนี้:\n${missing.map((k) => `  • ${k}`).join("\n")}\n\nกรุณาคัดลอก .env.example เป็น .env และใส่ค่าให้ครบ`
+      `❌ ขาด environment variables ต่อไปนี้:\n${missing.map((k) => `  • ${k}`).join("\n")}\n\nกรุณาคัดลอก .env.example เป็น .env และใส่ค่าให้ครบ`,
     );
   }
 }
@@ -54,6 +58,30 @@ async function main(): Promise<void> {
 
   // 5. ส่งเข้า Discord
   await sendToDiscord(healthData, analysis);
+
+  // 6. ตรวจสอบเงื่อนไขการส่งรายงานประจำสัปดาห์ (ทุกเช้าวันจันทร์ หรือเมื่อมีการบังคับ)
+  const timezone = process.env.TIMEZONE ?? "Asia/Bangkok";
+  const dayOfWeek = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    weekday: "long",
+  }).format(new Date());
+  const isMonday =
+    dayOfWeek === "Monday" || process.env.FORCE_WEEKLY === "true";
+
+  if (isMonday) {
+    console.log("\n" + "━".repeat(50));
+    console.log("📊 เริ่มสร้างรายงานสรุปประจำสัปดาห์ (Weekly Health Summary)");
+    console.log("━".repeat(50));
+
+    // ดึงข้อมูลย้อนหลัง 7 วัน
+    const weeklyData = await fetchWeeklyHealthData(accessToken);
+
+    // วิเคราะห์ด้วย Gemini
+    const weeklyAnalysis = await analyzeWeeklyTrends(weeklyData);
+
+    // ส่งรายงานรายสัปดาห์เข้า Discord
+    await sendWeeklyReportToDiscord(weeklyData, weeklyAnalysis);
+  }
 
   console.log("━".repeat(50));
   console.log("🎉 ทำงานเสร็จสิ้น!");

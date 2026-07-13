@@ -14,6 +14,7 @@ import {
   SleepReconcileResponse,
   SleepDataPoint,
   HealthData,
+  DailyRollupDataPoint,
 } from "./types";
 
 const HEALTH_BASE = "https://health.googleapis.com/v4";
@@ -132,26 +133,14 @@ async function fetchDailyRollUp(
  * ดึงข้อมูล Sleep ผ่าน reconcile endpoint (GET)
  *
  * Endpoint: GET /v4/users/me/dataTypes/sleep/dataPoints:reconcile
- *
- * ⚠️  ไม่ใช้ filter parameter เพราะ AIP-160 field name ของ sleep ไม่มีเอกสาร
- *     ดึง sessions ล่าสุดทั้งหมด (max 25) แล้ว filter วันที่ฝั่ง client แทน
  */
 async function fetchSleepReconcile(
   accessToken: string,
-  startDate: string, // "YYYY-MM-DD" (yesterday ใน Bangkok time)
-  endDate: string, // "YYYY-MM-DD" (today ใน Bangkok time)
+  sleepStartMs: number,
+  sleepEndMs: number,
+  pageSize = 50,
 ): Promise<SleepReconcileResponse> {
   const url = `${HEALTH_BASE}/users/me/dataTypes/sleep/dataPoints:reconcile`;
-
-  // Sleep window สำหรับ "คืนของเมื่อวาน":
-  //   เริ่ม: เมื่อวาน 18:00 Bangkok (เวลาเริ่มนอนเร็วที่สุดที่สมเหตุสมผล)
-  //   สิ้น: วันนี้  13:00 Bangkok (เวลาตื่นสายที่สุดที่สมเหตุสมผล)
-  //
-  // ตัวอย่าง:
-  //   นอน 23:00 Jul-12 Bangkok = 16:00 UTC Jul-12  (>= start ✓)
-  //   ตื่น 06:00 Jul-13 Bangkok = 23:00 UTC Jul-12  (<= end ✓)
-  const sleepStartMs = new Date(`${startDate}T18:00:00+07:00`).getTime(); // เมื่อวาน 18:00 BKK
-  const sleepEndMs = new Date(`${endDate}T13:00:00+07:00`).getTime(); // วันนี้ 13:00 BKK
 
   console.log(
     `    ↳ Sleep window: ${new Date(sleepStartMs).toISOString()} → ${new Date(sleepEndMs).toISOString()}`,
@@ -160,40 +149,37 @@ async function fetchSleepReconcile(
   try {
     const response = await axios.get<SleepReconcileResponse>(url, {
       headers: { Authorization: `Bearer ${accessToken}` },
-      params: { pageSize: 25 },
+      params: { pageSize },
     });
 
-    // ตรวจ field จริงของ response (อาจเป็น dataPoints หรือ field อื่น)
     const raw = response.data as unknown as Record<string, unknown>;
-    const allPoints: unknown[] = (
-      response.data.dataPoints ??
-      (raw["data_points"] as unknown[]) ??
-      []
-    );
-
-    // โครงสร้างจริงของ Google Health API v4 sleep session:
-    // dataPoint.sleep.interval.startTime / endTime  (ไม่ได้อยู่ top-level)
-    // dataPoint.sleep.summary.minutesAsleep         (เวลาอยู่ใน sleep.summary ไม่ได้อยู่ที่ top-level)
+    const allPoints: unknown[] =
+      response.data.dataPoints ?? (raw["data_points"] as unknown[]) ?? [];
 
     console.log(`    ↳ Sleep: พบ ${allPoints.length} sessions`);
 
-    const yesterdayPoints = allPoints.filter((item) => {
+    const rangePoints = allPoints.filter((item) => {
       const p = item as Record<string, unknown>;
       const sleepObj = p["sleep"] as Record<string, unknown> | undefined;
-      const interval = sleepObj?.["interval"] as Record<string, unknown> | undefined;
+      const interval = sleepObj?.["interval"] as
+        | Record<string, unknown>
+        | undefined;
 
       const startStr = interval?.["startTime"] as string | undefined;
-      const endStr   = interval?.["endTime"]   as string | undefined;
+      const endStr = interval?.["endTime"] as string | undefined;
       if (!startStr || !endStr) return false;
 
       const startT = new Date(startStr).getTime();
-      const endT   = new Date(endStr).getTime();
+      const endT = new Date(endStr).getTime();
       return startT >= sleepStartMs && endT <= sleepEndMs;
     });
 
-    console.log(`    ↳ กรองเหลือ ${yesterdayPoints.length} sleep session`);
+    console.log(`    ↳ กรองเหลือ ${rangePoints.length} sleep session`);
 
-    return { dataPoints: yesterdayPoints as SleepDataPoint[], nextPageToken: undefined };
+    return {
+      dataPoints: rangePoints as SleepDataPoint[],
+      nextPageToken: undefined,
+    };
   } catch (error) {
     handleApiError("reconcile/sleep", error);
   }
@@ -201,13 +187,30 @@ async function fetchSleepReconcile(
 
 // ─── Parsers ─────────────────────────────────────────────────────────────────
 
-function parseSteps(data: DailyRollUpResponse): number {
+export function findRollupPointForDate(
+  data: DailyRollUpResponse,
+  dateStr: string,
+): DailyRollupDataPoint | undefined {
+  return (data.rollupDataPoints ?? []).find((point) => {
+    const start = point.civilStartTime;
+    if (!start || !start.date) return false;
+    const formatted = `${start.date.year}-${String(start.date.month).padStart(2, "0")}-${String(start.date.day).padStart(2, "0")}`;
+    return formatted === dateStr;
+  });
+}
+
+export function parseStepsForDate(
+  data: DailyRollUpResponse,
+  dateStr: string,
+): number {
+  const point = findRollupPointForDate(data, dateStr);
+  const countSum = point?.steps?.countSum;
+  return countSum ? parseInt(String(countSum), 10) : 0;
+}
+
+export function parseSteps(data: DailyRollUpResponse): number {
   let total = 0;
-
-  // Field จริงจาก Google Health API v4 ชื่อว่า rollupDataPoints
   const points = data.rollupDataPoints ?? [];
-  console.log(`    ↳ steps: พบ ${points.length} dataPoints`);
-
   for (const point of points) {
     const countSum = point.steps?.countSum;
     if (countSum) total += parseInt(String(countSum), 10);
@@ -221,16 +224,27 @@ interface HeartRateStats {
   max: number;
 }
 
-function parseHeartRate(data: DailyRollUpResponse): HeartRateStats {
+export function parseHeartRateForDate(
+  data: DailyRollUpResponse,
+  dateStr: string,
+): HeartRateStats {
+  const point = findRollupPointForDate(data, dateStr);
+  const hr = point?.heartRate;
+  if (!hr) return { avg: 0, min: 0, max: 0 };
+  return {
+    avg: Math.round(hr.beatsPerMinuteAvg ?? 0),
+    min: Math.round(hr.beatsPerMinuteMin ?? 0),
+    max: Math.round(hr.beatsPerMinuteMax ?? 0),
+  };
+}
+
+export function parseHeartRate(data: DailyRollUpResponse): HeartRateStats {
   let sumAvg = 0;
   let globalMin = Infinity;
   let globalMax = -Infinity;
   let count = 0;
 
-  // Field จริงจาก Google Health API v4 ชื่อว่า rollupDataPoints
   const points = data.rollupDataPoints ?? [];
-  console.log(`    ↳ heartRate: พบ ${points.length} dataPoints`);
-
   for (const point of points) {
     const hr = point.heartRate;
     if (!hr) continue;
@@ -254,15 +268,55 @@ function parseHeartRate(data: DailyRollUpResponse): HeartRateStats {
   };
 }
 
-function parseSleepMinutes(data: SleepReconcileResponse): number {
-  let totalMinutes = 0;
+export function parseSleepMinutesForDate(
+  allPoints: SleepDataPoint[],
+  dateStr: string,
+): number {
+  const d = new Date(dateStr);
+  const nextDay = new Date(d.getTime() + 24 * 60 * 60 * 1000);
+  const nextDayStr = `${nextDay.getFullYear()}-${String(nextDay.getMonth() + 1).padStart(2, "0")}-${String(nextDay.getDate()).padStart(2, "0")}`;
 
+  const sleepStartMs = new Date(`${dateStr}T18:00:00+07:00`).getTime();
+  const sleepEndMs = new Date(`${nextDayStr}T13:00:00+07:00`).getTime();
+
+  let totalMinutes = 0;
+  for (const point of allPoints) {
+    const p = point as Record<string, unknown>;
+    const sleepObj = p["sleep"] as Record<string, unknown> | undefined;
+    if (!sleepObj) continue;
+
+    const interval = sleepObj["interval"] as
+      | Record<string, unknown>
+      | undefined;
+    const startStr = interval?.["startTime"] as string | undefined;
+    const endStr = interval?.["endTime"] as string | undefined;
+    if (!startStr || !endStr) continue;
+
+    const startT = new Date(startStr).getTime();
+    const endT = new Date(endStr).getTime();
+
+    if (startT >= sleepStartMs && endT <= sleepEndMs) {
+      const summary = sleepObj["summary"] as
+        | Record<string, unknown>
+        | undefined;
+      const minutesAsleep = summary?.["minutesAsleep"];
+      if (minutesAsleep) {
+        totalMinutes += parseInt(String(minutesAsleep), 10);
+      } else {
+        totalMinutes += Math.round((endT - startT) / 60_000);
+      }
+    }
+  }
+  return totalMinutes;
+}
+
+export function parseSleepMinutes(data: SleepReconcileResponse): number {
+  let totalMinutes = 0;
   for (const point of data.dataPoints ?? []) {
     const p = point as unknown as Record<string, unknown>;
     const sleepObj = p["sleep"] as Record<string, unknown> | undefined;
     if (!sleepObj) continue;
 
-    // ใช้ minutesAsleep จาก summary โดยตรง (เวลาอยู่ใน sleep.summary)
     const summary = sleepObj["summary"] as Record<string, unknown> | undefined;
     const minutesAsleep = summary?.["minutesAsleep"];
     if (minutesAsleep) {
@@ -270,82 +324,206 @@ function parseSleepMinutes(data: SleepReconcileResponse): number {
       continue;
     }
 
-    // Fallback: คำนวณจาก sleep.interval.startTime/endTime
-    const interval = sleepObj["interval"] as Record<string, unknown> | undefined;
+    const interval = sleepObj["interval"] as
+      | Record<string, unknown>
+      | undefined;
     const startStr = interval?.["startTime"] as string | undefined;
-    const endStr   = interval?.["endTime"]   as string | undefined;
+    const endStr = interval?.["endTime"] as string | undefined;
     if (startStr && endStr) {
       const start = new Date(startStr).getTime();
-      const end   = new Date(endStr).getTime();
+      const end = new Date(endStr).getTime();
       if (!isNaN(start) && !isNaN(end) && end > start) {
         totalMinutes += Math.round((end - start) / 60_000);
       }
     }
   }
-
   return totalMinutes;
 }
 
-function formatSleepDuration(minutes: number): string {
+export function parseTotalCaloriesForDate(
+  data: DailyRollUpResponse,
+  dateStr: string,
+): number {
+  const point = findRollupPointForDate(data, dateStr);
+  const kcalSum = point?.totalCalories?.kcalSum;
+  return kcalSum ? Math.round(kcalSum) : 0;
+}
+
+export function parseTotalCalories(data: DailyRollUpResponse): number {
+  let total = 0;
+  const points = data.rollupDataPoints ?? [];
+  for (const point of points) {
+    const kcalSum = point.totalCalories?.kcalSum;
+    if (kcalSum) total += kcalSum;
+  }
+  return Math.round(total);
+}
+
+interface ActiveZoneMinutesDetails {
+  total: number;
+  fatBurn: number;
+  cardio: number;
+  peak: number;
+}
+
+export function parseActiveZoneMinutesForDate(
+  data: DailyRollUpResponse,
+  dateStr: string,
+): ActiveZoneMinutesDetails {
+  const point = findRollupPointForDate(data, dateStr);
+  const azm = point?.activeZoneMinutes;
+  if (!azm) return { total: 0, fatBurn: 0, cardio: 0, peak: 0 };
+  const fatBurn = parseInt(azm.sumInFatBurnHeartZone ?? "0", 10);
+  const cardio = parseInt(azm.sumInCardioHeartZone ?? "0", 10);
+  const peak = parseInt(azm.sumInPeakHeartZone ?? "0", 10);
+  return {
+    total: fatBurn + cardio + peak,
+    fatBurn,
+    cardio,
+    peak,
+  };
+}
+
+export function parseActiveZoneMinutes(
+  data: DailyRollUpResponse,
+): ActiveZoneMinutesDetails {
+  let fatBurn = 0;
+  let cardio = 0;
+  let peak = 0;
+  const points = data.rollupDataPoints ?? [];
+  for (const point of points) {
+    const azm = point.activeZoneMinutes;
+    if (azm) {
+      fatBurn += parseInt(azm.sumInFatBurnHeartZone ?? "0", 10);
+      cardio += parseInt(azm.sumInCardioHeartZone ?? "0", 10);
+      peak += parseInt(azm.sumInPeakHeartZone ?? "0", 10);
+    }
+  }
+  return {
+    total: fatBurn + cardio + peak,
+    fatBurn,
+    cardio,
+    peak,
+  };
+}
+
+interface RestingHeartRateRange {
+  min: number;
+  max: number;
+}
+
+export function parseRestingHeartRateRangeForDate(
+  data: DailyRollUpResponse,
+  dateStr: string,
+): RestingHeartRateRange {
+  const point = findRollupPointForDate(data, dateStr);
+  const rhr = point?.restingHeartRatePersonalRange;
+  if (!rhr) return { min: 0, max: 0 };
+  return {
+    min: Math.round(rhr.beatsPerMinuteMin ?? 0),
+    max: Math.round(rhr.beatsPerMinuteMax ?? 0),
+  };
+}
+
+export function parseRestingHeartRateRange(
+  data: DailyRollUpResponse,
+): RestingHeartRateRange {
+  let globalMin = Infinity;
+  let globalMax = -Infinity;
+  const points = data.rollupDataPoints ?? [];
+  for (const point of points) {
+    const rhr = point.restingHeartRatePersonalRange;
+    if (rhr) {
+      const min = rhr.beatsPerMinuteMin ?? 0;
+      const max = rhr.beatsPerMinuteMax ?? 0;
+      if (min > 0 && min < globalMin) globalMin = min;
+      if (max > 0 && max > globalMax) globalMax = max;
+    }
+  }
+  return {
+    min: globalMin === Infinity ? 0 : Math.round(globalMin),
+    max: globalMax === -Infinity ? 0 : Math.round(globalMax),
+  };
+}
+
+export function formatSleepDuration(minutes: number): string {
   if (minutes === 0) return "ไม่มีข้อมูล";
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return `${h} ชั่วโมง ${m} นาที`;
 }
 
-// ─── Main Export ─────────────────────────────────────────────────────────────
+// ─── Main Exports ────────────────────────────────────────────────────────────
 
 /**
- * ดึงข้อมูลสุขภาพทั้งหมดของเมื่อวานจาก Google Health API v4
- * และคืน HealthData object ที่พร้อมส่งให้ Gemini วิเคราะห์
+ * ดึงข้อมูลสุขภาพทั้งหมดของวันที่ระบุ
  */
-export async function fetchYesterdayHealthData(
+export async function fetchHealthDataForDate(
   accessToken: string,
+  dateLabel: string,
+  year: number,
+  month: number,
+  day: number,
 ): Promise<HealthData> {
-  const timezone = process.env.TIMEZONE ?? "Asia/Bangkok";
-  const { year, month, day, dateLabel } = getYesterdayDate(timezone);
   const range = buildDayRange(year, month, day);
 
-  // สร้าง date string สำหรับ sleep reconcile filter
   const startDateStr = dateLabel; // "YYYY-MM-DD"
   const nextDay = buildNextDay(year, month, day);
   const endDateStr = `${nextDay.date.year}-${String(nextDay.date.month).padStart(2, "0")}-${String(nextDay.date.day).padStart(2, "0")}`;
 
+  const sleepStartMs = new Date(`${startDateStr}T18:00:00+07:00`).getTime();
+  const sleepEndMs = new Date(`${endDateStr}T13:00:00+07:00`).getTime();
+
   console.log(
     `📅 ดึงข้อมูลวันที่: ${dateLabel} (${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")} civil time)`,
   );
-  console.log("📊 กำลังดึงข้อมูล Google Health API v4...");
 
-  // ─── ดึงทีละ call เพื่อให้ log บอกได้ว่า call ไหนพัง ─────────────────────
-
-  console.log("  ├─ 1/3 ก้าวเดิน (steps → dailyRollUp)...");
   const stepsData = await fetchDailyRollUp(accessToken, "steps", range);
-
-  console.log("  ├─ 2/3 อัตราการเต้นหัวใจ (heart-rate → dailyRollUp)...");
   const heartRateData = await fetchDailyRollUp(
     accessToken,
     "heart-rate",
     range,
   );
-
-  console.log("  └─ 3/3 การนอนหลับ (sleep → reconcile)...");
   const sleepData = await fetchSleepReconcile(
     accessToken,
-    startDateStr,
-    endDateStr,
+    sleepStartMs,
+    sleepEndMs,
+    25,
+  );
+  const totalCaloriesData = await fetchDailyRollUp(
+    accessToken,
+    "total-calories",
+    range,
+  );
+  const activeZoneMinutesData = await fetchDailyRollUp(
+    accessToken,
+    "active-zone-minutes",
+    range,
+  );
+  const restingHeartRateData = await fetchDailyRollUp(
+    accessToken,
+    "daily-resting-heart-rate",
+    range,
   );
 
-  // ─── แปลงข้อมูล ────────────────────────────────────────────────────────
-
-  const steps = parseSteps(stepsData);
-  const heartRate = parseHeartRate(heartRateData);
-  const sleepMinutes = parseSleepMinutes(sleepData);
+  const steps = parseStepsForDate(stepsData, dateLabel);
+  const heartRate = parseHeartRateForDate(heartRateData, dateLabel);
+  const sleepMinutes = parseSleepMinutesForDate(
+    sleepData.dataPoints,
+    dateLabel,
+  );
+  const totalCalories = parseTotalCaloriesForDate(totalCaloriesData, dateLabel);
+  const azm = parseActiveZoneMinutesForDate(activeZoneMinutesData, dateLabel);
+  const rhr = parseRestingHeartRateRangeForDate(
+    restingHeartRateData,
+    dateLabel,
+  );
 
   const STEP_GOAL = 10_000;
   const stepGoalPercent = Math.round((steps / STEP_GOAL) * 100);
 
   console.log(
-    `✅ ก้าว: ${steps.toLocaleString()} | นอน: ${sleepMinutes} นาที | หัวใจ avg: ${heartRate.avg} bpm`,
+    `✅ [${dateLabel}] ก้าว: ${steps.toLocaleString()} | นอน: ${sleepMinutes} นาที | แคลอรี่: ${totalCalories} kcal | Active Min: ${azm.total} นาที`,
   );
 
   return {
@@ -357,10 +535,218 @@ export async function fetchYesterdayHealthData(
     heartRateAvg: heartRate.avg,
     heartRateMin: heartRate.min,
     heartRateMax: heartRate.max,
+    totalCalories,
+    activeZoneMinutesTotal: azm.total,
+    activeZoneMinutesDetails: {
+      fatBurn: azm.fatBurn,
+      cardio: azm.cardio,
+      peak: azm.peak,
+    },
+    restingHeartRateMin: rhr.min,
+    restingHeartRateMax: rhr.max,
     rawData: {
       steps: stepsData,
       heartRate: heartRateData,
       sleep: sleepData,
+      totalCalories: totalCaloriesData,
+      activeZoneMinutes: activeZoneMinutesData,
+      restingHeartRate: restingHeartRateData,
     },
   };
+}
+
+/**
+ * ดึงข้อมูลสุขภาพทั้งหมดของเมื่อวาน
+ */
+export async function fetchYesterdayHealthData(
+  accessToken: string,
+): Promise<HealthData> {
+  const timezone = process.env.TIMEZONE ?? "Asia/Bangkok";
+  const { year, month, day, dateLabel } = getYesterdayDate(timezone);
+  console.log(
+    `📊 กำลังดึงข้อมูลของเมื่อวาน (${dateLabel}) จาก Google Health API v4...`,
+  );
+  return fetchHealthDataForDate(accessToken, dateLabel, year, month, day);
+}
+
+interface WeeklyDates {
+  dateLabels: string[];
+  startYear: number;
+  startMonth: number;
+  startDay: number;
+  endYear: number;
+  endMonth: number;
+  endDay: number;
+}
+
+export function getWeeklyDates(timezone: string = "Asia/Bangkok"): WeeklyDates {
+  const now = new Date();
+
+  const todayLabel = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+  }).format(now);
+  const [ty, tm, td] = todayLabel.split("-").map(Number);
+
+  const dateLabels: string[] = [];
+  // 7 วันที่ผ่านมา (ไม่รวมวันนี้)
+  for (let i = 7; i >= 1; i--) {
+    const d = new Date(Date.UTC(ty, tm - 1, td - i, 12, 0, 0));
+    const label = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+    }).format(d);
+    dateLabels.push(label);
+  }
+
+  const startDate = dateLabels[0];
+  const endDate = dateLabels[dateLabels.length - 1];
+
+  const [startYear, startMonth, startDay] = startDate.split("-").map(Number);
+  const [endYear, endMonth, endDay] = endDate.split("-").map(Number);
+
+  return {
+    dateLabels,
+    startYear,
+    startMonth,
+    startDay,
+    endYear,
+    endMonth,
+    endDay,
+  };
+}
+
+/**
+ * ดึงข้อมูลสุขภาพย้อนหลัง 7 วัน สำหรับสรุปภาพรวมรายสัปดาห์
+ */
+export async function fetchWeeklyHealthData(
+  accessToken: string,
+): Promise<HealthData[]> {
+  const timezone = process.env.TIMEZONE ?? "Asia/Bangkok";
+  const {
+    dateLabels,
+    startYear,
+    startMonth,
+    startDay,
+    endYear,
+    endMonth,
+    endDay,
+  } = getWeeklyDates(timezone);
+
+  console.log(`📅 ดึงข้อมูลรายสัปดาห์: ${dateLabels[0]} ➔ ${dateLabels[6]}`);
+  console.log("📊 กำลังดึงข้อมูลแบบช่วง 7 วัน...");
+
+  const start = { date: { year: startYear, month: startMonth, day: startDay } };
+  const nextEnd = buildNextDay(endYear, endMonth, endDay);
+  const range = { start, end: nextEnd };
+
+  const startDateStr = dateLabels[0];
+  const endDateStr = `${nextEnd.date.year}-${String(nextEnd.date.month).padStart(2, "0")}-${String(nextEnd.date.day).padStart(2, "0")}`;
+
+  const sleepStartMs = new Date(`${startDateStr}T18:00:00+07:00`).getTime();
+  const sleepEndMs = new Date(`${endDateStr}T13:00:00+07:00`).getTime();
+
+  // ดึงข้อมูล range ใหญ่ 1 call ต่อ 1 dataType (ลด API call)
+  const stepsData = await fetchDailyRollUp(accessToken, "steps", range);
+  const heartRateData = await fetchDailyRollUp(
+    accessToken,
+    "heart-rate",
+    range,
+  );
+  const sleepData = await fetchSleepReconcile(
+    accessToken,
+    sleepStartMs,
+    sleepEndMs,
+    100,
+  );
+  const totalCaloriesData = await fetchDailyRollUp(
+    accessToken,
+    "total-calories",
+    range,
+  );
+  const activeZoneMinutesData = await fetchDailyRollUp(
+    accessToken,
+    "active-zone-minutes",
+    range,
+  );
+  const restingHeartRateData = await fetchDailyRollUp(
+    accessToken,
+    "daily-resting-heart-rate",
+    range,
+  );
+
+  const weeklyList: HealthData[] = [];
+
+  for (const dateLabel of dateLabels) {
+    const steps = parseStepsForDate(stepsData, dateLabel);
+    const heartRate = parseHeartRateForDate(heartRateData, dateLabel);
+    const sleepMinutes = parseSleepMinutesForDate(
+      sleepData.dataPoints,
+      dateLabel,
+    );
+    const totalCalories = parseTotalCaloriesForDate(
+      totalCaloriesData,
+      dateLabel,
+    );
+    const azm = parseActiveZoneMinutesForDate(activeZoneMinutesData, dateLabel);
+    const rhr = parseRestingHeartRateRangeForDate(
+      restingHeartRateData,
+      dateLabel,
+    );
+
+    const STEP_GOAL = 10_000;
+    const stepGoalPercent = Math.round((steps / STEP_GOAL) * 100);
+
+    weeklyList.push({
+      date: dateLabel,
+      steps,
+      stepGoalPercent,
+      sleepDurationMinutes: sleepMinutes,
+      sleepDurationFormatted: formatSleepDuration(sleepMinutes),
+      heartRateAvg: heartRate.avg,
+      heartRateMin: heartRate.min,
+      heartRateMax: heartRate.max,
+      totalCalories,
+      activeZoneMinutesTotal: azm.total,
+      activeZoneMinutesDetails: {
+        fatBurn: azm.fatBurn,
+        cardio: azm.cardio,
+        peak: azm.peak,
+      },
+      restingHeartRateMin: rhr.min,
+      restingHeartRateMax: rhr.max,
+      rawData: {
+        steps: {
+          rollupDataPoints: stepsData.rollupDataPoints.filter((p) =>
+            findRollupPointForDate({ rollupDataPoints: [p] }, dateLabel),
+          ),
+        },
+        heartRate: {
+          rollupDataPoints: heartRateData.rollupDataPoints.filter((p) =>
+            findRollupPointForDate({ rollupDataPoints: [p] }, dateLabel),
+          ),
+        },
+        sleep: {
+          dataPoints: sleepData.dataPoints.filter(
+            (p) => parseSleepMinutesForDate([p], dateLabel) > 0,
+          ),
+        },
+        totalCalories: {
+          rollupDataPoints: totalCaloriesData.rollupDataPoints.filter((p) =>
+            findRollupPointForDate({ rollupDataPoints: [p] }, dateLabel),
+          ),
+        },
+        activeZoneMinutes: {
+          rollupDataPoints: activeZoneMinutesData.rollupDataPoints.filter((p) =>
+            findRollupPointForDate({ rollupDataPoints: [p] }, dateLabel),
+          ),
+        },
+        restingHeartRate: {
+          rollupDataPoints: restingHeartRateData.rollupDataPoints.filter((p) =>
+            findRollupPointForDate({ rollupDataPoints: [p] }, dateLabel),
+          ),
+        },
+      },
+    });
+  }
+
+  return weeklyList;
 }
