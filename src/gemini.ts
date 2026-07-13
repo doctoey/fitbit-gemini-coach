@@ -4,8 +4,9 @@
 import axios from "axios";
 import { GeminiRequest, GeminiResponse, HealthData } from "./types";
 
-// โมเดลล่าสุดของ Gemini
-const GEMINI_MODEL = "gemini-2.5-flash";
+// โมเดลล่าสุดของ Gemini — อัปเดตจาก models list (July 2026)
+// Ref: GET https://generativelanguage.googleapis.com/v1beta/models?key=...
+const GEMINI_MODEL = "gemini-3.5-flash";  // Newest Flash (May 2026), supports generateContent
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
 /**
@@ -79,6 +80,9 @@ export async function analyzeWithGemini(health: HealthData): Promise<string> {
       topK: 40,
       topP: 0.95,
       maxOutputTokens: 1024,
+      // Disable thinking เพื่อลด latency และค่าใช้จ่าย
+      // Health coaching ไม่จำเป็นต้องใช้ thinking mode
+      thinkingConfig: { thinkingBudget: 0 },
     },
   };
 
