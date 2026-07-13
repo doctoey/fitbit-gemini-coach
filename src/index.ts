@@ -2,6 +2,8 @@
 // Entry point หลัก — Orchestrator ที่รวมทุก module เข้าด้วยกัน
 
 import dotenv from "dotenv";
+import fs from "fs";
+import path from "path";
 
 // โหลด .env ถ้ามีไฟล์ (local dev)
 // บน GitHub Actions: env vars ถูก inject จาก Secrets โดยอัตโนมัติ ไม่ต้องมีไฟล์ .env
@@ -53,11 +55,35 @@ async function main(): Promise<void> {
   // 3. ดึงข้อมูลสุขภาพเมื่อวาน
   const healthData = await fetchYesterdayHealthData(accessToken);
 
+  // ตรวจสอบข้อมูลการนอนหลับ (Sleep)
+  const isLastAttempt = process.env.LAST_ATTEMPT === "true";
+  if (healthData.sleepDurationMinutes === 0 && !isLastAttempt) {
+    console.log("\n⚠️ พบเวลานอนเป็น 0 คาดว่ายังไม่ได้ซิงค์ข้อมูล (จะข้ามการส่งรายงานรอบนี้เพื่อรอรอบถัดไป)");
+    console.log("━".repeat(50));
+    console.log("🎉 ทำงานเสร็จสิ้น (ข้ามการส่งรายงาน)!");
+    console.log("━".repeat(50));
+    return;
+  }
+
   // 4. ส่งให้ Gemini วิเคราะห์
   const analysis = await analyzeWithGemini(healthData);
 
   // 5. ส่งเข้า Discord
   await sendToDiscord(healthData, analysis);
+
+  // บันทึกสถานะเพื่อบอก GitHub Actions ว่ารันสำเร็จและส่งรายงานเรียบร้อยแล้ว
+  if (process.env.GITHUB_OUTPUT) {
+    const cacheDir = path.join(process.cwd(), ".health-coach-success");
+    if (!fs.existsSync(cacheDir)) {
+      fs.mkdirSync(cacheDir, { recursive: true });
+    }
+    fs.writeFileSync(
+      path.join(cacheDir, "marker.txt"),
+      `Success at ${new Date().toISOString()}`
+    );
+    fs.appendFileSync(process.env.GITHUB_OUTPUT, "should_cache=true\n");
+    console.log("📝 บันทึกสถานะการส่งรายงานเข้า GITHUB_OUTPUT เรียบร้อย");
+  }
 
   // 6. ตรวจสอบเงื่อนไขการส่งรายงานประจำสัปดาห์ (ทุกเช้าวันจันทร์ หรือเมื่อมีการบังคับ)
   const timezone = process.env.TIMEZONE ?? "Asia/Bangkok";

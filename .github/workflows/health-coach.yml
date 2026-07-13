@@ -12,9 +12,10 @@ name: 🏃 Daily Health Coach Report
 on:
   # ─── Scheduled trigger ────────────────────────────────────────
   schedule:
-    # 09:00 Asia/Bangkok (UTC+7) = 02:00 UTC
-    # หมายเหตุ: GitHub ไม่รับประกันเวลาแน่นอน อาจ delay ได้ถึง 1 ชั่วโมง
-    - cron: "0 2 * * *"
+    # Run at 09:00, 09:30, and 10:00 Asia/Bangkok (UTC+7 = UTC+0)
+    # 09:00 BKK = 02:00 UTC, 09:30 BKK = 02:30 UTC, 10:00 BKK = 03:00 UTC
+    - cron: "0,30 2 * * *"
+    - cron: "0 3 * * *"
 
   # ─── Manual trigger (ทดสอบรันตามต้องการ) ─────────────────────
   workflow_dispatch:
@@ -47,8 +48,43 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
+      # ─── Step 1.1: Calculate Bangkok Date ───────────────────────
+      - name: 📅 Get current date in Bangkok
+        id: date
+        run: |
+          echo "today=$(TZ='Asia/Bangkok' date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+          echo "hour=$(TZ='Asia/Bangkok' date +'%H')" >> $GITHUB_OUTPUT
+
+      # ─── Step 1.2: Restore Success Cache ────────────────────────
+      - name: 🔍 Check success cache for today
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .health-coach-success
+          key: health-coach-success-${{ steps.date.outputs.today }}
+
+      # ─── Step 1.3: Determine if last attempt ────────────────────
+      - name: ⚙️ Determine if last attempt
+        if: steps.cache.outputs.cache-hit != 'true'
+        id: attempt
+        run: |
+          TRIGGER="${{ github.event_name }}"
+          HOUR="${{ steps.date.outputs.hour }}"
+          
+          if [ "$TRIGGER" != "schedule" ]; then
+            echo "LAST_ATTEMPT=true" >> $GITHUB_ENV
+            echo "Is last attempt (Manual/Push): true"
+          elif [ "$HOUR" -ge 10 ]; then
+            echo "LAST_ATTEMPT=true" >> $GITHUB_ENV
+            echo "Is last attempt (Final morning run): true"
+          else
+            echo "LAST_ATTEMPT=false" >> $GITHUB_ENV
+            echo "Is last attempt (Scheduled retry): false"
+          fi
+
       # ─── Step 2: Setup Node.js ──────────────────────────────────
       - name: ⚙️ Setup Node.js 22
+        if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "22"   # ใช้ LTS ล่าสุด (v20 deprecated แล้ว)
@@ -56,18 +92,22 @@ jobs:
 
       # ─── Step 3: Install dependencies ───────────────────────────
       - name: 📦 Install dependencies
+        if: steps.cache.outputs.cache-hit != 'true'
         run: npm ci  # ใช้ ci แทน install เพื่อ reproducible build
 
       # ─── Step 4: Run Unit Tests ─────────────────────────────────
       - name: 🧪 Run Unit Tests
+        if: steps.cache.outputs.cache-hit != 'true'
         run: npm test
 
       # ─── Step 5: Type-check & Build TypeScript ──────────────────
       - name: 🔨 Build TypeScript
+        if: steps.cache.outputs.cache-hit != 'true'
         run: npm run build
 
       # ─── Step 6: Run Health Coach ───────────────────────────────
       - name: 🏃 Run AI Health Coach
+        if: steps.cache.outputs.cache-hit != 'true'
         id: health_coach
         run: npm start
         env:
@@ -85,11 +125,20 @@ jobs:
           # ── App Config ───────────────────────────────────────────
           TIMEZONE:  "Asia/Bangkok"
           NODE_ENV:  "production"
+          LAST_ATTEMPT: ${{ env.LAST_ATTEMPT }}
+
+      # ─── Step 6.1: Save success cache ───────────────────────────
+      - name: 💾 Save success cache for today
+        if: steps.cache.outputs.cache-hit != 'true' && steps.health_coach.outputs.should_cache == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .health-coach-success
+          key: health-coach-success-${{ steps.date.outputs.today }}
 
       # ─── Step 7: GitHub Step Summary ────────────────────────────
       # แสดงผลสรุปใน Actions UI → Actions tab → เลือก run → Summary
       - name: 📋 Write Job Summary
-        if: always()
+        if: always() && steps.cache.outputs.cache-hit != 'true'
         run: |
           STATUS="${{ steps.health_coach.outcome }}"
           if [ "$STATUS" = "success" ]; then
@@ -109,9 +158,18 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "[🔗 View full log](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
 
+      # ─── Step 7.1: Show Cache Hit Info ──────────────────────────
+      - name: 📋 Show Cache Hit Info
+        if: always() && steps.cache.outputs.cache-hit == 'true'
+        run: |
+          echo "## ✅ AI Health Coach — Already Succeeded Today" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "วันนี้มีการส่งรายงานสำเร็จเรียบร้อยแล้ว (ตรวจพบ Cache: \`health-coach-success-${{ steps.date.outputs.today }}\`)" >> $GITHUB_STEP_SUMMARY
+          echo "ระบบข้ามการทำงานรอบนี้เพื่อประหยัดโควตาการรัน" >> $GITHUB_STEP_SUMMARY
+
       # ─── Step 8: Notify on failure ──────────────────────────────
       - name: 🚨 Notify Discord on failure
-        if: failure()
+        if: failure() && steps.cache.outputs.cache-hit != 'true'
         run: |
           curl -s -X POST "${{ secrets.DISCORD_WEBHOOK_URL }}" \
             -H "Content-Type: application/json" \
