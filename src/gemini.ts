@@ -6,8 +6,51 @@ import { GeminiRequest, GeminiResponse, HealthData } from "./types";
 
 // โมเดลล่าสุดของ Gemini — อัปเดตจาก models list (July 2026)
 // Ref: GET https://generativelanguage.googleapis.com/v1beta/models?key=...
-const GEMINI_MODEL = "gemini-3.5-flash";  // Newest Flash (May 2026), supports generateContent
+const GEMINI_MODEL = "gemini-3.5-flash"; // Newest Flash (May 2026), supports generateContent
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+
+/** แปลง UTC ISO string เป็นเวลาไทย (Bangkok GMT+7) รูปแบบ HH:MM น. */
+function toThaiTime(utcStr: string): string {
+  return (
+    new Date(utcStr).toLocaleTimeString("th-TH", {
+      timeZone: "Asia/Bangkok",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }) + " น."
+  );
+}
+
+/** สรุป sleep sessions เป็น text ที่ Gemini อ่านได้ถูกต้อง (เวลาไทยแล้ว) */
+function formatSleepForPrompt(
+  data: import("./types").SleepReconcileResponse,
+): string {
+  const points = data.dataPoints ?? [];
+  if (points.length === 0) return "ไม่มีข้อมูลการนอนหลับ";
+
+  return points
+    .map((point) => {
+      const p = point as Record<string, unknown>;
+      const sleepObj = p["sleep"] as Record<string, unknown> | undefined;
+      const interval = sleepObj?.["interval"] as
+        | Record<string, unknown>
+        | undefined;
+      const summary = sleepObj?.["summary"] as
+        | Record<string, unknown>
+        | undefined;
+
+      const startUtc = interval?.["startTime"] as string | undefined;
+      const endUtc = interval?.["endTime"] as string | undefined;
+      const minutesAsleep = summary?.["minutesAsleep"] ?? "?";
+      const minutesInPeriod = summary?.["minutesInSleepPeriod"] ?? "?";
+
+      const startThai = startUtc ? toThaiTime(startUtc) : "?";
+      const endThai = endUtc ? toThaiTime(endUtc) : "?";
+
+      return `เข้านอน ${startThai} → ตื่น ${endThai} | หลับจริง ${minutesAsleep} นาที (ช่วงนอน ${minutesInPeriod} นาที)`;
+    })
+    .join("\n");
+}
 
 /**
  * สร้าง prompt ที่ละเอียดและมีบริบทสำหรับ Gemini
@@ -24,6 +67,8 @@ function buildPrompt(health: HealthData): string {
     2,
   );
 
+  const sleepFormatted = formatSleepForPrompt(health.rawData.sleep);
+
   return `คุณคือ AI Health Coach ส่วนตัวที่พูดภาษาไทยเป็นกันเองและให้กำลังใจ
 
 ต่อไปนี้คือข้อมูลสุขภาพของผู้ใช้เมื่อวาน (${health.date}):
@@ -33,7 +78,11 @@ function buildPrompt(health: HealthData): string {
 - 😴 เวลานอน: ${health.sleepDurationFormatted} (${health.sleepDurationMinutes} นาที)
 - ❤️  อัตราการเต้นหัวใจเฉลี่ย: ${health.heartRateAvg} bpm (ต่ำสุด ${health.heartRateMin} | สูงสุด ${health.heartRateMax})
 
+## ช่วงเวลานอนหลับ (เวลาประเทศไทย GMT+7 แล้ว — ใช้ข้อมูลชุดนี้ในการวิเคราะห์)
+${sleepFormatted}
+
 ## ข้อมูล JSON ดิบจาก Google Fit
+⚠️ หมายเหตุ: เวลาทั้งหมดใน JSON นี้เป็น UTC — ต้องบวก 7 ชั่วโมงเพื่อแปลงเป็นเวลาไทย
 \`\`\`json
 ${rawJson}
 \`\`\`
@@ -48,6 +97,7 @@ ${rawJson}
 
 **รูปแบบการตอบ:**
 - ใช้ภาษาไทยเป็นกันเอง ไม่เป็นทางการ เหมือนพี่โค้ชคุยกัน
+- **สำคัญ: ใช้ "ช่วงเวลานอนหลับ" ที่แปลงเป็นเวลาไทยแล้วในการวิเคราะห์** ห้ามอ้างอิงเวลา UTC จาก JSON โดยตรง
 - ใช้อิโมจิประดับให้ดูสนุก
 - ความยาวรวม ประมาณ 200-300 คำ
 - **สำคัญ**: ตอบเฉพาะเนื้อหาวิเคราะห์ ห้ามใส่ header หรือ markdown ที่ไม่จำเป็น (เพราะจะถูกส่งต่อไป Discord โดยตรง)
