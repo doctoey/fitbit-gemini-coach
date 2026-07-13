@@ -193,16 +193,22 @@ async function fetchSleepReconcile(
 function parseSteps(data: DailyRollUpResponse): number {
   let total = 0;
 
-  // Debug: แสดง structure ของ dataPoint แรก
-  if (data.dataPoints?.length) {
-    console.log("    ↳ [debug] steps dataPoints[0]:", JSON.stringify(data.dataPoints[0], null, 2));
+  // รองรับทั้ง camelCase (dataPoints) และ snake_case (data_points)
+  // Google Health API v4 อาจส่ง field name ได้ทั้งสองรูปแบบ
+  const raw = data as unknown as Record<string, unknown>;
+  const points: unknown[] = (data.dataPoints ?? (raw["data_points"] as unknown[]) ?? []);
+
+  // Debug: แสดง top-level keys และ dataPoint[0] เพื่อรู้ field จริง
+  console.log("    ↳ [debug] steps response keys:", Object.keys(raw).join(", "));
+  if (points.length > 0) {
+    console.log("    ↳ [debug] steps dataPoints[0]:", JSON.stringify(points[0], null, 2));
   } else {
     console.log("    ↳ [debug] steps: dataPoints ว่างเปล่า");
   }
 
-  for (const point of data.dataPoints ?? []) {
-    // Google Health API v4: steps.countSum เป็น int64 string
-    const p = point as Record<string, unknown>;
+  for (const item of points) {
+    const p = item as Record<string, unknown>;
+    // รองรับทั้ง steps และ step
     const stepsObj = (p["steps"] ?? p["step"]) as Record<string, unknown> | undefined;
     const countSum = stepsObj?.["countSum"] ?? stepsObj?.["count_sum"];
     if (countSum) total += parseInt(String(countSum), 10);
@@ -222,16 +228,21 @@ function parseHeartRate(data: DailyRollUpResponse): HeartRateStats {
   let globalMax = -Infinity;
   let count = 0;
 
-  // Debug: แสดง structure ของ dataPoint แรก
-  if (data.dataPoints?.length) {
-    console.log("    ↳ [debug] heartRate dataPoints[0]:", JSON.stringify(data.dataPoints[0], null, 2));
+  // รองรับทั้ง camelCase (dataPoints) และ snake_case (data_points)
+  const raw = data as unknown as Record<string, unknown>;
+  const points: unknown[] = (data.dataPoints ?? (raw["data_points"] as unknown[]) ?? []);
+
+  // Debug: แสดง top-level keys และ dataPoint[0]
+  console.log("    ↳ [debug] heartRate response keys:", Object.keys(raw).join(", "));
+  if (points.length > 0) {
+    console.log("    ↳ [debug] heartRate dataPoints[0]:", JSON.stringify(points[0], null, 2));
   } else {
     console.log("    ↳ [debug] heartRate: dataPoints ว่างเปล่า");
   }
 
-  for (const point of data.dataPoints ?? []) {
-    // สนับสนุนทั้ง camelCase และ snake_case
-    const p = point as Record<string, unknown>;
+  for (const item of points) {
+    const p = item as Record<string, unknown>;
+    // รองรับทั้ง heartRate และ heart_rate
     const hrObj = (p["heartRate"] ?? p["heart_rate"]) as Record<string, unknown> | undefined;
     if (!hrObj) continue;
 
