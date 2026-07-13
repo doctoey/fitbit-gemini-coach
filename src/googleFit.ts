@@ -12,6 +12,7 @@ import {
   DailyRollUpRequest,
   DailyRollUpResponse,
   SleepReconcileResponse,
+  SleepDataPoint,
   HealthData,
 } from "./types";
 
@@ -162,33 +163,42 @@ async function fetchSleepReconcile(
       params: { pageSize: 25 },
     });
 
-    const allPoints = response.data.dataPoints ?? [];
+    // ตรวจ field จริงของ response (อาจเป็น dataPoints หรือ field อื่น)
+    const raw = response.data as unknown as Record<string, unknown>;
+    const allPoints: unknown[] = (
+      response.data.dataPoints ??
+      (raw["data_points"] as unknown[]) ??
+      []
+    );
 
-    // แสดง timestamp ของทุก session เพื่อ debug
+    // Dump session[0] เพื่อดู field name จริงจาก API
     if (allPoints.length > 0) {
-      console.log(`    ↳ Sessions ทั้งหมด:`);
-      allPoints.forEach((p, i) => {
-        console.log(
-          `       [${i}] start=${p.startTime ?? "?"}  end=${p.endTime ?? "?"}`,
-        );
-      });
+      console.log(`    ↳ Sleep: พบ ${allPoints.length} sessions, response keys: [${Object.keys(raw).join(", ")}]`);
+      console.log(`    ↳ session[0] raw:`, JSON.stringify(allPoints[0], null, 2));
+    } else {
+      console.log(`    ↳ Sleep: ไม่มี session, response keys: [${Object.keys(raw).join(", ")}]`);
     }
 
-    // กรองเฉพาะ session ที่:
-    //   startTime >= เมื่อวาน 18:00 Bangkok
-    //   endTime   <= วันนี้ 13:00 Bangkok
-    const yesterdayPoints = allPoints.filter((point) => {
-      const startT = point.startTime
-        ? new Date(point.startTime).getTime()
-        : null;
-      const endT = point.endTime ? new Date(point.endTime).getTime() : null;
+    // ดึง startTime/endTime โดยรองรับทั้ง camelCase และ snake_case
+    const getTime = (item: unknown, ...keys: string[]): number | null => {
+      const p = item as Record<string, unknown>;
+      for (const k of keys) {
+        const v = p[k];
+        if (v && typeof v === "string") return new Date(v).getTime();
+      }
+      return null;
+    };
+
+    const yesterdayPoints = allPoints.filter((item) => {
+      const startT = getTime(item, "startTime", "start_time");
+      const endT   = getTime(item, "endTime",   "end_time");
       if (startT === null || endT === null) return false;
       return startT >= sleepStartMs && endT <= sleepEndMs;
     });
 
     console.log(`    ↳ กรองเหลือ ${yesterdayPoints.length} sleep session`);
 
-    return { dataPoints: yesterdayPoints, nextPageToken: undefined };
+    return { dataPoints: yesterdayPoints as SleepDataPoint[], nextPageToken: undefined };
   } catch (error) {
     handleApiError("reconcile/sleep", error);
   }
