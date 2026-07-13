@@ -75,10 +75,24 @@ export interface ActiveZoneMinutesRollupValue {
   sumInFatBurnHeartZone?: string;
 }
 
-/** Response: Resting Heart Rate Personal Range */
-export interface RestingHeartRatePersonalRangeRollupValue {
-  beatsPerMinuteMin?: number;
-  beatsPerMinuteMax?: number;
+/** Response: Resting Heart Rate from reconcile */
+export interface DailyRestingHeartRate {
+  date?: {
+    year: number;
+    month: number;
+    day: number;
+  };
+  beatsPerMinute?: string | number;
+}
+
+export interface RestingHeartRateDataPoint {
+  dailyRestingHeartRate?: DailyRestingHeartRate;
+  [key: string]: unknown;
+}
+
+export interface RestingHeartRateReconcileResponse {
+  dataPoints: RestingHeartRateDataPoint[];
+  nextPageToken?: string;
 }
 
 /** Data point หนึ่งก้อน จาก dailyRollUp response */
@@ -91,7 +105,6 @@ export interface DailyRollupDataPoint {
   sleep?: { summary?: SleepSummary };
   totalCalories?: TotalCaloriesRollupValue;
   activeZoneMinutes?: ActiveZoneMinutesRollupValue;
-  restingHeartRatePersonalRange?: RestingHeartRatePersonalRangeRollupValue;
   [key: string]: unknown; // รองรับ field อื่นๆ
 }
 
@@ -151,8 +164,7 @@ export interface HealthData {
     cardio: number;
     peak: number;
   };
-  restingHeartRateMin: number; // ช่วงชีพจรขณะพักต่ำสุด (bpm)
-  restingHeartRateMax: number; // ช่วงชีพจรขณะพักสูงสุด (bpm)
+  restingHeartRate: number; // ชีพจรขณะพัก (bpm)
   rawData: {
     // JSON ดิบสำหรับส่งให้ Gemini
     steps: DailyRollUpResponse;
@@ -160,7 +172,7 @@ export interface HealthData {
     sleep: SleepReconcileResponse; // ใช้ reconcile endpoint เพราะ sleep ไม่รองรับ dailyRollUp
     totalCalories: DailyRollUpResponse;
     activeZoneMinutes: DailyRollUpResponse;
-    restingHeartRate: DailyRollUpResponse;
+    restingHeartRate: RestingHeartRateReconcileResponse;
   };
 }
 

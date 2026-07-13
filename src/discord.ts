@@ -14,17 +14,25 @@ import { DiscordPayload, HealthData } from "./types";
 
 const COLOR = {
   EXCELLENT: 0x2ecc71, // เขียว
-  GOOD:      0x3498db, // ฟ้า
-  AVERAGE:   0xf39c12, // เหลือง
-  POOR:      0xe74c3c, // แดง
+  GOOD: 0x3498db, // ฟ้า
+  AVERAGE: 0xf39c12, // เหลือง
+  POOR: 0xe74c3c, // แดง
 };
 
 function pickColor(health: HealthData): number {
   const score =
     (health.stepGoalPercent >= 100 ? 2 : health.stepGoalPercent >= 50 ? 1 : 0) +
-    (health.sleepDurationMinutes >= 420 ? 2 : health.sleepDurationMinutes >= 300 ? 1 : 0) +
+    (health.sleepDurationMinutes >= 420
+      ? 2
+      : health.sleepDurationMinutes >= 300
+        ? 1
+        : 0) +
     (health.heartRateAvg >= 60 && health.heartRateAvg <= 100 ? 2 : 1) +
-    (health.activeZoneMinutesTotal >= 30 ? 2 : health.activeZoneMinutesTotal >= 15 ? 1 : 0);
+    (health.activeZoneMinutesTotal >= 30
+      ? 2
+      : health.activeZoneMinutesTotal >= 15
+        ? 1
+        : 0);
 
   if (score >= 6) return COLOR.EXCELLENT;
   if (score >= 4) return COLOR.GOOD;
@@ -41,9 +49,10 @@ function progressBar(percent: number, total = 10): string {
 
 function buildStatsSection(health: HealthData): string {
   const stepBar = progressBar(Math.min(health.stepGoalPercent, 100));
-  const rhrStr = health.restingHeartRateMin > 0 
-    ? `**${health.restingHeartRateMin} - ${health.restingHeartRateMax}** bpm`
-    : "ไม่มีข้อมูล";
+  const rhrStr =
+    health.restingHeartRate > 0
+      ? `**${health.restingHeartRate}** bpm`
+      : "ไม่มีข้อมูล";
 
   return [
     `📅 **รายงานสุขภาพประจำวัน: ${health.date}**`,
@@ -69,7 +78,7 @@ function buildStatsSection(health: HealthData): string {
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
     ``,
     `🤖 **บทวิเคราะห์และแนะนำโดย AI Coach**`,
-    ``
+    ``,
   ].join("\n");
 }
 
@@ -78,16 +87,16 @@ function buildStatsSection(health: HealthData): string {
 /** ตัดคำแบบปลอดภัย ไม่ให้ markdown พังกรณีเกิน limit 4096 */
 function safeTruncate(text: string, maxLen = 4096): string {
   if (text.length <= maxLen) return text;
-  
+
   // ตัดลงมาให้ปลอดภัย เผื่อพื้นที่ใส่คำว่า ...
   let truncated = text.slice(0, maxLen - 100);
-  
+
   // ตรวจสอบพวก code block หรือ markdown tags ที่อาจจะเปิดค้างไว้
   const codeBlockCount = (truncated.match(/```/g) || []).length;
   if (codeBlockCount % 2 !== 0) {
     truncated += "\n```"; // ปิด code block ที่ค้างไว้
   }
-  
+
   return truncated + "\n\n*(เนื้อหาบางส่วนถูกละไว้เนื่องจากยาวเกินกำหนด)*";
 }
 
@@ -98,7 +107,7 @@ function safeTruncate(text: string, maxLen = 4096): string {
  */
 export async function sendToDiscord(
   health: HealthData,
-  geminiAnalysis: string
+  geminiAnalysis: string,
 ): Promise<void> {
   const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
   if (!webhookUrl) {
@@ -138,7 +147,7 @@ export async function sendToDiscord(
  */
 export async function sendWeeklyReportToDiscord(
   weeklyData: HealthData[],
-  geminiAnalysis: string
+  geminiAnalysis: string,
 ): Promise<void> {
   const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
   if (!webhookUrl) {
@@ -150,9 +159,15 @@ export async function sendWeeklyReportToDiscord(
   const dateRangeStr = `${weeklyData[0].date} ถึง ${weeklyData[weeklyData.length - 1].date}`;
   const totalSteps = weeklyData.reduce((sum, d) => sum + d.steps, 0);
   const avgSteps = Math.round(totalSteps / weeklyData.length);
-  const totalActiveMins = weeklyData.reduce((sum, d) => sum + d.activeZoneMinutesTotal, 0);
+  const totalActiveMins = weeklyData.reduce(
+    (sum, d) => sum + d.activeZoneMinutesTotal,
+    0,
+  );
   const totalCalories = weeklyData.reduce((sum, d) => sum + d.totalCalories, 0);
-  const avgSleepMins = Math.round(weeklyData.reduce((sum, d) => sum + d.sleepDurationMinutes, 0) / weeklyData.length);
+  const avgSleepMins = Math.round(
+    weeklyData.reduce((sum, d) => sum + d.sleepDurationMinutes, 0) /
+      weeklyData.length,
+  );
   const avgSleepFormatted = `${Math.floor(avgSleepMins / 60)} ชั่วโมง ${avgSleepMins % 60} นาที`;
 
   let weeklyColor = COLOR.AVERAGE;
@@ -173,7 +188,7 @@ export async function sendWeeklyReportToDiscord(
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
     ``,
     `📊 **วิเคราะห์แนวโน้มสุขภาพรายสัปดาห์**`,
-    ``
+    ``,
   ].join("\n");
 
   const fullDescription = statsSection + geminiAnalysis;

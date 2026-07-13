@@ -15,6 +15,8 @@ import {
   SleepDataPoint,
   HealthData,
   DailyRollupDataPoint,
+  RestingHeartRateReconcileResponse,
+  RestingHeartRateDataPoint,
 } from "./types";
 
 const HEALTH_BASE = "https://health.googleapis.com/v4";
@@ -182,6 +184,23 @@ async function fetchSleepReconcile(
     };
   } catch (error) {
     handleApiError("reconcile/sleep", error);
+  }
+}
+
+async function fetchRestingHeartRateReconcile(
+  accessToken: string,
+  pageSize = 50,
+): Promise<RestingHeartRateReconcileResponse> {
+  const url = `${HEALTH_BASE}/users/me/dataTypes/daily-resting-heart-rate/dataPoints:reconcile`;
+
+  try {
+    const response = await axios.get<RestingHeartRateReconcileResponse>(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { pageSize },
+    });
+    return response.data;
+  } catch (error) {
+    handleApiError("reconcile/daily-resting-heart-rate", error);
   }
 }
 
@@ -407,43 +426,28 @@ export function parseActiveZoneMinutes(
   };
 }
 
-interface RestingHeartRateRange {
-  min: number;
-  max: number;
-}
-
-export function parseRestingHeartRateRangeForDate(
-  data: DailyRollUpResponse,
+export function parseRestingHeartRateForDate(
+  allPoints: RestingHeartRateDataPoint[],
   dateStr: string,
-): RestingHeartRateRange {
-  const point = findRollupPointForDate(data, dateStr);
-  const rhr = point?.restingHeartRatePersonalRange;
-  if (!rhr) return { min: 0, max: 0 };
-  return {
-    min: Math.round(rhr.beatsPerMinuteMin ?? 0),
-    max: Math.round(rhr.beatsPerMinuteMax ?? 0),
-  };
+): number {
+  const point = allPoints.find((item) => {
+    const rhr = item.dailyRestingHeartRate;
+    if (!rhr || !rhr.date) return false;
+    const formatted = `${rhr.date.year}-${String(rhr.date.month).padStart(2, "0")}-${String(rhr.date.day).padStart(2, "0")}`;
+    return formatted === dateStr;
+  });
+  const bpm = point?.dailyRestingHeartRate?.beatsPerMinute;
+  return bpm ? parseInt(String(bpm), 10) : 0;
 }
 
-export function parseRestingHeartRateRange(
-  data: DailyRollUpResponse,
-): RestingHeartRateRange {
-  let globalMin = Infinity;
-  let globalMax = -Infinity;
-  const points = data.rollupDataPoints ?? [];
-  for (const point of points) {
-    const rhr = point.restingHeartRatePersonalRange;
-    if (rhr) {
-      const min = rhr.beatsPerMinuteMin ?? 0;
-      const max = rhr.beatsPerMinuteMax ?? 0;
-      if (min > 0 && min < globalMin) globalMin = min;
-      if (max > 0 && max > globalMax) globalMax = max;
-    }
+export function parseRestingHeartRate(
+  data: RestingHeartRateReconcileResponse,
+): number {
+  for (const point of data.dataPoints ?? []) {
+    const bpm = point.dailyRestingHeartRate?.beatsPerMinute;
+    if (bpm) return parseInt(String(bpm), 10);
   }
-  return {
-    min: globalMin === Infinity ? 0 : Math.round(globalMin),
-    max: globalMax === -Infinity ? 0 : Math.round(globalMax),
-  };
+  return 0;
 }
 
 export function formatSleepDuration(minutes: number): string {
@@ -500,10 +504,9 @@ export async function fetchHealthDataForDate(
     "active-zone-minutes",
     range,
   );
-  const restingHeartRateData = await fetchDailyRollUp(
+  const restingHeartRateData = await fetchRestingHeartRateReconcile(
     accessToken,
-    "daily-resting-heart-rate",
-    range,
+    25,
   );
 
   const steps = parseStepsForDate(stepsData, dateLabel);
@@ -514,8 +517,8 @@ export async function fetchHealthDataForDate(
   );
   const totalCalories = parseTotalCaloriesForDate(totalCaloriesData, dateLabel);
   const azm = parseActiveZoneMinutesForDate(activeZoneMinutesData, dateLabel);
-  const rhr = parseRestingHeartRateRangeForDate(
-    restingHeartRateData,
+  const rhr = parseRestingHeartRateForDate(
+    restingHeartRateData.dataPoints,
     dateLabel,
   );
 
@@ -542,8 +545,7 @@ export async function fetchHealthDataForDate(
       cardio: azm.cardio,
       peak: azm.peak,
     },
-    restingHeartRateMin: rhr.min,
-    restingHeartRateMax: rhr.max,
+    restingHeartRate: rhr,
     rawData: {
       steps: stepsData,
       heartRate: heartRateData,
@@ -667,10 +669,9 @@ export async function fetchWeeklyHealthData(
     "active-zone-minutes",
     range,
   );
-  const restingHeartRateData = await fetchDailyRollUp(
+  const restingHeartRateData = await fetchRestingHeartRateReconcile(
     accessToken,
-    "daily-resting-heart-rate",
-    range,
+    100,
   );
 
   const weeklyList: HealthData[] = [];
@@ -687,8 +688,8 @@ export async function fetchWeeklyHealthData(
       dateLabel,
     );
     const azm = parseActiveZoneMinutesForDate(activeZoneMinutesData, dateLabel);
-    const rhr = parseRestingHeartRateRangeForDate(
-      restingHeartRateData,
+    const rhr = parseRestingHeartRateForDate(
+      restingHeartRateData.dataPoints,
       dateLabel,
     );
 
@@ -711,8 +712,7 @@ export async function fetchWeeklyHealthData(
         cardio: azm.cardio,
         peak: azm.peak,
       },
-      restingHeartRateMin: rhr.min,
-      restingHeartRateMax: rhr.max,
+      restingHeartRate: rhr,
       rawData: {
         steps: {
           rollupDataPoints: stepsData.rollupDataPoints.filter((p) =>
@@ -740,8 +740,8 @@ export async function fetchWeeklyHealthData(
           ),
         },
         restingHeartRate: {
-          rollupDataPoints: restingHeartRateData.rollupDataPoints.filter((p) =>
-            findRollupPointForDate({ rollupDataPoints: [p] }, dateLabel),
+          dataPoints: restingHeartRateData.dataPoints.filter(
+            (p) => parseRestingHeartRateForDate([p], dateLabel) > 0,
           ),
         },
       },

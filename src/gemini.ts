@@ -94,7 +94,7 @@ function buildPrompt(health: HealthData): string {
 - ❤️ อัตราการเต้นหัวใจเฉลี่ย: ${health.heartRateAvg} bpm (ต่ำสุด ${health.heartRateMin} | สูงสุด ${health.heartRateMax})
 - 🔥 พลังงานที่เผาผลาญ: ${health.totalCalories} kcal
 - ⚡ Active Zone Minutes: ${health.activeZoneMinutesTotal} นาที (Fat Burn: ${health.activeZoneMinutesDetails.fatBurn} นาที, Cardio: ${health.activeZoneMinutesDetails.cardio} นาที, Peak: ${health.activeZoneMinutesDetails.peak} นาที)
-- 💓 ช่วงชีพจรขณะพัก (Resting HR Range): ${health.restingHeartRateMin} - ${health.restingHeartRateMax} bpm
+- 💓 ชีพจรขณะพัก (Resting HR): ${health.restingHeartRate > 0 ? `${health.restingHeartRate} bpm` : "ไม่มีข้อมูล"}
 
 ## ช่วงเวลานอนหลับ (เวลาประเทศไทย GMT+7 แล้ว — ใช้ข้อมูลชุดนี้ในการวิเคราะห์)
 ${sleepFormatted}
@@ -132,9 +132,7 @@ function buildWeeklyPrompt(weeklyData: HealthData[]): string {
     "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
     ...weeklyData.map((d) => {
       const rhrStr =
-        d.restingHeartRateMin > 0
-          ? `${d.restingHeartRateMin}-${d.restingHeartRateMax} bpm`
-          : "ไม่มีข้อมูล";
+        d.restingHeartRate > 0 ? `${d.restingHeartRate} bpm` : "ไม่มีข้อมูล";
       return `| ${d.date} | ${d.steps.toLocaleString()} ก้าว (${d.stepGoalPercent}%) | ${d.sleepDurationFormatted} | ${d.heartRateAvg} bpm (${d.heartRateMin}-${d.heartRateMax}) | ${rhrStr} | ${d.totalCalories} | ${d.activeZoneMinutesTotal} นาที |`;
     }),
   ].join("\n");

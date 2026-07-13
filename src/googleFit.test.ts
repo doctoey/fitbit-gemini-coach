@@ -6,16 +6,20 @@ import {
   parseSleepMinutesForDate,
   parseTotalCaloriesForDate,
   parseActiveZoneMinutesForDate,
-  parseRestingHeartRateRangeForDate,
+  parseRestingHeartRateForDate,
   parseSteps,
   parseHeartRate,
   parseSleepMinutes,
   parseTotalCalories,
   parseActiveZoneMinutes,
-  parseRestingHeartRateRange,
+  parseRestingHeartRate,
   formatSleepDuration,
 } from "./googleFit";
-import { DailyRollUpResponse, SleepReconcileResponse } from "./types";
+import {
+  DailyRollUpResponse,
+  SleepReconcileResponse,
+  RestingHeartRateReconcileResponse,
+} from "./types";
 
 describe("Google Fit Parsers & Date Helpers", () => {
   // ─── Mock Data ─────────────────────────────────────────────────────────────
@@ -91,14 +95,12 @@ describe("Google Fit Parsers & Date Helpers", () => {
     ],
   };
 
-  const mockRestingHeartRateData: DailyRollUpResponse = {
-    rollupDataPoints: [
+  const mockRestingHeartRateData: RestingHeartRateReconcileResponse = {
+    dataPoints: [
       {
-        civilStartTime: { date: { year: 2026, month: 7, day: 12 } },
-        civilEndTime: { date: { year: 2026, month: 7, day: 13 } },
-        restingHeartRatePersonalRange: {
-          beatsPerMinuteMin: 58.2,
-          beatsPerMinuteMax: 62.8,
+        dailyRestingHeartRate: {
+          date: { year: 2026, month: 7, day: 12 },
+          beatsPerMinute: "58",
         },
       },
     ],
@@ -210,26 +212,23 @@ describe("Google Fit Parsers & Date Helpers", () => {
     expect(azm.peak).toBe(5);
   });
 
-  test("parseRestingHeartRateRangeForDate parses personal resting hr range", () => {
-    const rhr = parseRestingHeartRateRangeForDate(
-      mockRestingHeartRateData,
+  test("parseRestingHeartRateForDate parses personal resting hr", () => {
+    const rhr = parseRestingHeartRateForDate(
+      mockRestingHeartRateData.dataPoints,
       "2026-07-12",
     );
-    expect(rhr.min).toBe(58);
-    expect(rhr.max).toBe(63);
+    expect(rhr).toBe(58);
 
-    const rhrMissing = parseRestingHeartRateRangeForDate(
-      mockRestingHeartRateData,
+    const rhrMissing = parseRestingHeartRateForDate(
+      mockRestingHeartRateData.dataPoints,
       "2026-07-13",
     );
-    expect(rhrMissing.min).toBe(0);
-    expect(rhrMissing.max).toBe(0);
+    expect(rhrMissing).toBe(0);
   });
 
-  test("parseRestingHeartRateRange parses overall personal resting hr range", () => {
-    const rhr = parseRestingHeartRateRange(mockRestingHeartRateData);
-    expect(rhr.min).toBe(58);
-    expect(rhr.max).toBe(63);
+  test("parseRestingHeartRate parses overall resting hr from reconcile response", () => {
+    const rhr = parseRestingHeartRate(mockRestingHeartRateData);
+    expect(rhr).toBe(58);
   });
 
   test("formatSleepDuration formats minutes into text correctly", () => {
