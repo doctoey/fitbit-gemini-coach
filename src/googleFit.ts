@@ -136,10 +136,13 @@ async function fetchSleepReconcile(
 ): Promise<SleepReconcileResponse> {
   const url = `${HEALTH_BASE}/users/me/dataTypes/sleep/dataPoints:reconcile`;
 
-  // แปลง Bangkok midnight เป็น UTC milliseconds สำหรับ client-side filter
-  // เมื่อวาน Bangkok = [YYYY-MM-DDT00:00:00+07:00, YYYY-MM-DD+1T00:00:00+07:00)
+  // Bangkok midnight ของเมื่อวาน
   const startMs = new Date(`${startDate}T00:00:00+07:00`).getTime();
   const endMs   = new Date(`${endDate}T00:00:00+07:00`).getTime();
+
+  // ขยาย window ย้อนหลัง 6 ชั่วโมง เพื่อรับ session ที่เริ่มนอนตั้งแต่ 18:00 ของวันก่อน
+  // (คนนอน 23:00 Bangkok Jul-12 → startTime = 16:00 UTC Jul-12 ซึ่งก่อน startMs)
+  const startMsEarly = startMs - 6 * 3_600_000; // -6h
 
   console.log(`    ↳ UTC window: ${new Date(startMs).toISOString()} → ${new Date(endMs).toISOString()}`);
 
@@ -166,13 +169,12 @@ async function fetchSleepReconcile(
     }
 
     // กรองโดยดู endTime ว่าอยู่ใน window เมื่อวาน Bangkok
+    // ใช้ startMsEarly (ถอยหลัง 6h) เพื่อรับ session ที่นอนตั้งแต่เย็นๆ
     const yesterdayPoints = allPoints.filter((point) => {
       const endT   = point.endTime   ? new Date(point.endTime).getTime()   : null;
       const startT = point.startTime ? new Date(point.startTime).getTime() : null;
       if (endT === null || startT === null) return false;
-      // session ที่ตื่น (endTime) อยู่ใน window เมื่อวาน
-      // และเริ่มนอน (startTime) ก่อนสิ้นสุด window (ป้องกัน nap สั้นในวันอื่น)
-      return endT > startMs && endT <= endMs && startT < endMs;
+      return endT > startMsEarly && endT <= endMs && startT < endMs;
     });
 
     console.log(
@@ -190,10 +192,20 @@ async function fetchSleepReconcile(
 
 function parseSteps(data: DailyRollUpResponse): number {
   let total = 0;
+
+  // Debug: แสดง structure ของ dataPoint แรก
+  if (data.dataPoints?.length) {
+    console.log("    ↳ [debug] steps dataPoints[0]:", JSON.stringify(data.dataPoints[0], null, 2));
+  } else {
+    console.log("    ↳ [debug] steps: dataPoints ว่างเปล่า");
+  }
+
   for (const point of data.dataPoints ?? []) {
-    // steps.countSum เป็น int64 ที่ API ส่งมาเป็น string
-    const countSum = point.steps?.countSum;
-    if (countSum) total += parseInt(countSum, 10);
+    // Google Health API v4: steps.countSum เป็น int64 string
+    const p = point as Record<string, unknown>;
+    const stepsObj = (p["steps"] ?? p["step"]) as Record<string, unknown> | undefined;
+    const countSum = stepsObj?.["countSum"] ?? stepsObj?.["count_sum"];
+    if (countSum) total += parseInt(String(countSum), 10);
   }
   return total;
 }
@@ -205,25 +217,31 @@ interface HeartRateStats {
 }
 
 function parseHeartRate(data: DailyRollUpResponse): HeartRateStats {
-  // dailyRollUp ส่ง heartRate ต่อ bucket
-  // ถ้ามีหลาย bucket ให้เฉลี่ย avg และหา min/max รวม
   let sumAvg = 0;
   let globalMin = Infinity;
   let globalMax = -Infinity;
   let count = 0;
 
-  for (const point of data.dataPoints ?? []) {
-    const hr = point.heartRate;
-    if (!hr) continue;
+  // Debug: แสดง structure ของ dataPoint แรก
+  if (data.dataPoints?.length) {
+    console.log("    ↳ [debug] heartRate dataPoints[0]:", JSON.stringify(data.dataPoints[0], null, 2));
+  } else {
+    console.log("    ↳ [debug] heartRate: dataPoints ว่างเปล่า");
+  }
 
-    if (hr.beatsPerMinuteAvg > 0) {
-      sumAvg += hr.beatsPerMinuteAvg;
-      count++;
-    }
-    if (hr.beatsPerMinuteMin > 0 && hr.beatsPerMinuteMin < globalMin)
-      globalMin = hr.beatsPerMinuteMin;
-    if (hr.beatsPerMinuteMax > 0 && hr.beatsPerMinuteMax > globalMax)
-      globalMax = hr.beatsPerMinuteMax;
+  for (const point of data.dataPoints ?? []) {
+    // สนับสนุนทั้ง camelCase และ snake_case
+    const p = point as Record<string, unknown>;
+    const hrObj = (p["heartRate"] ?? p["heart_rate"]) as Record<string, unknown> | undefined;
+    if (!hrObj) continue;
+
+    const avg = Number(hrObj["beatsPerMinuteAvg"] ?? hrObj["beats_per_minute_avg"] ?? 0);
+    const min = Number(hrObj["beatsPerMinuteMin"] ?? hrObj["beats_per_minute_min"] ?? 0);
+    const max = Number(hrObj["beatsPerMinuteMax"] ?? hrObj["beats_per_minute_max"] ?? 0);
+
+    if (avg > 0) { sumAvg += avg; count++; }
+    if (min > 0 && min < globalMin) globalMin = min;
+    if (max > 0 && max > globalMax) globalMax = max;
   }
 
   return {
