@@ -74,9 +74,12 @@ export interface DailyRollupDataPoint {
   [key: string]: unknown; // รองรับ field อื่นๆ
 }
 
-/** Response จาก dailyRollUp */
+/** Response จาก dailyRollUp
+ *  ⚠️  Field จริงจาก API ชื่อว่า rollupDataPoints ไม่ใช่ dataPoints
+ *      (ยืนยันจาก debug log: "steps response keys: rollupDataPoints")
+ */
 export interface DailyRollUpResponse {
-  dataPoints: DailyRollupDataPoint[];
+  rollupDataPoints: DailyRollupDataPoint[]; // ชื่อ field จริงจาก Google Health API v4
   nextPageToken?: string;
 }
 

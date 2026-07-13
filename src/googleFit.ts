@@ -193,24 +193,12 @@ async function fetchSleepReconcile(
 function parseSteps(data: DailyRollUpResponse): number {
   let total = 0;
 
-  // รองรับทั้ง camelCase (dataPoints) และ snake_case (data_points)
-  // Google Health API v4 อาจส่ง field name ได้ทั้งสองรูปแบบ
-  const raw = data as unknown as Record<string, unknown>;
-  const points: unknown[] = (data.dataPoints ?? (raw["data_points"] as unknown[]) ?? []);
+  // Field จริงจาก Google Health API v4 ชื่อว่า rollupDataPoints
+  const points = data.rollupDataPoints ?? [];
+  console.log(`    ↳ steps: พบ ${points.length} dataPoints`);
 
-  // Debug: แสดง top-level keys และ dataPoint[0] เพื่อรู้ field จริง
-  console.log("    ↳ [debug] steps response keys:", Object.keys(raw).join(", "));
-  if (points.length > 0) {
-    console.log("    ↳ [debug] steps dataPoints[0]:", JSON.stringify(points[0], null, 2));
-  } else {
-    console.log("    ↳ [debug] steps: dataPoints ว่างเปล่า");
-  }
-
-  for (const item of points) {
-    const p = item as Record<string, unknown>;
-    // รองรับทั้ง steps และ step
-    const stepsObj = (p["steps"] ?? p["step"]) as Record<string, unknown> | undefined;
-    const countSum = stepsObj?.["countSum"] ?? stepsObj?.["count_sum"];
+  for (const point of points) {
+    const countSum = point.steps?.countSum;
     if (countSum) total += parseInt(String(countSum), 10);
   }
   return total;
@@ -228,27 +216,17 @@ function parseHeartRate(data: DailyRollUpResponse): HeartRateStats {
   let globalMax = -Infinity;
   let count = 0;
 
-  // รองรับทั้ง camelCase (dataPoints) และ snake_case (data_points)
-  const raw = data as unknown as Record<string, unknown>;
-  const points: unknown[] = (data.dataPoints ?? (raw["data_points"] as unknown[]) ?? []);
+  // Field จริงจาก Google Health API v4 ชื่อว่า rollupDataPoints
+  const points = data.rollupDataPoints ?? [];
+  console.log(`    ↳ heartRate: พบ ${points.length} dataPoints`);
 
-  // Debug: แสดง top-level keys และ dataPoint[0]
-  console.log("    ↳ [debug] heartRate response keys:", Object.keys(raw).join(", "));
-  if (points.length > 0) {
-    console.log("    ↳ [debug] heartRate dataPoints[0]:", JSON.stringify(points[0], null, 2));
-  } else {
-    console.log("    ↳ [debug] heartRate: dataPoints ว่างเปล่า");
-  }
+  for (const point of points) {
+    const hr = point.heartRate;
+    if (!hr) continue;
 
-  for (const item of points) {
-    const p = item as Record<string, unknown>;
-    // รองรับทั้ง heartRate และ heart_rate
-    const hrObj = (p["heartRate"] ?? p["heart_rate"]) as Record<string, unknown> | undefined;
-    if (!hrObj) continue;
-
-    const avg = Number(hrObj["beatsPerMinuteAvg"] ?? hrObj["beats_per_minute_avg"] ?? 0);
-    const min = Number(hrObj["beatsPerMinuteMin"] ?? hrObj["beats_per_minute_min"] ?? 0);
-    const max = Number(hrObj["beatsPerMinuteMax"] ?? hrObj["beats_per_minute_max"] ?? 0);
+    const avg = hr.beatsPerMinuteAvg ?? 0;
+    const min = hr.beatsPerMinuteMin ?? 0;
+    const max = hr.beatsPerMinuteMax ?? 0;
 
     if (avg > 0) { sumAvg += avg; count++; }
     if (min > 0 && min < globalMin) globalMin = min;
