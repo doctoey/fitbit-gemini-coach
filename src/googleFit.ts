@@ -171,28 +171,23 @@ async function fetchSleepReconcile(
       []
     );
 
-    // Dump session[0] เพื่อดู field name จริงจาก API
-    if (allPoints.length > 0) {
-      console.log(`    ↳ Sleep: พบ ${allPoints.length} sessions, response keys: [${Object.keys(raw).join(", ")}]`);
-      console.log(`    ↳ session[0] raw:`, JSON.stringify(allPoints[0], null, 2));
-    } else {
-      console.log(`    ↳ Sleep: ไม่มี session, response keys: [${Object.keys(raw).join(", ")}]`);
-    }
+    // โครงสร้างจริงของ Google Health API v4 sleep session:
+    // dataPoint.sleep.interval.startTime / endTime  (ไม่ได้อยู่ top-level)
+    // dataPoint.sleep.summary.minutesAsleep         (เวลาอยู่ใน sleep.summary ไม่ได้อยู่ที่ top-level)
 
-    // ดึง startTime/endTime โดยรองรับทั้ง camelCase และ snake_case
-    const getTime = (item: unknown, ...keys: string[]): number | null => {
-      const p = item as Record<string, unknown>;
-      for (const k of keys) {
-        const v = p[k];
-        if (v && typeof v === "string") return new Date(v).getTime();
-      }
-      return null;
-    };
+    console.log(`    ↳ Sleep: พบ ${allPoints.length} sessions`);
 
     const yesterdayPoints = allPoints.filter((item) => {
-      const startT = getTime(item, "startTime", "start_time");
-      const endT   = getTime(item, "endTime",   "end_time");
-      if (startT === null || endT === null) return false;
+      const p = item as Record<string, unknown>;
+      const sleepObj = p["sleep"] as Record<string, unknown> | undefined;
+      const interval = sleepObj?.["interval"] as Record<string, unknown> | undefined;
+
+      const startStr = interval?.["startTime"] as string | undefined;
+      const endStr   = interval?.["endTime"]   as string | undefined;
+      if (!startStr || !endStr) return false;
+
+      const startT = new Date(startStr).getTime();
+      const endT   = new Date(endStr).getTime();
       return startT >= sleepStartMs && endT <= sleepEndMs;
     });
 
@@ -260,29 +255,35 @@ function parseHeartRate(data: DailyRollUpResponse): HeartRateStats {
 }
 
 function parseSleepMinutes(data: SleepReconcileResponse): number {
-  let totalMs = 0;
+  let totalMinutes = 0;
 
   for (const point of data.dataPoints ?? []) {
-    // Priority 1: ใช้ summary.minutesInSleepPeriod ถ้ามี
-    const minutesStr =
-      point.sleep?.summary?.minutesInSleepPeriod ??
-      point.sleep?.summary?.minutesAsleep;
-    if (minutesStr) {
-      totalMs += parseInt(minutesStr, 10) * 60_000;
+    const p = point as unknown as Record<string, unknown>;
+    const sleepObj = p["sleep"] as Record<string, unknown> | undefined;
+    if (!sleepObj) continue;
+
+    // ใช้ minutesAsleep จาก summary โดยตรง (เวลาอยู่ใน sleep.summary)
+    const summary = sleepObj["summary"] as Record<string, unknown> | undefined;
+    const minutesAsleep = summary?.["minutesAsleep"];
+    if (minutesAsleep) {
+      totalMinutes += parseInt(String(minutesAsleep), 10);
       continue;
     }
 
-    // Priority 2: คำนวณจาก startTime/endTime ของ session
-    if (point.startTime && point.endTime) {
-      const start = new Date(point.startTime).getTime();
-      const end = new Date(point.endTime).getTime();
+    // Fallback: คำนวณจาก sleep.interval.startTime/endTime
+    const interval = sleepObj["interval"] as Record<string, unknown> | undefined;
+    const startStr = interval?.["startTime"] as string | undefined;
+    const endStr   = interval?.["endTime"]   as string | undefined;
+    if (startStr && endStr) {
+      const start = new Date(startStr).getTime();
+      const end   = new Date(endStr).getTime();
       if (!isNaN(start) && !isNaN(end) && end > start) {
-        totalMs += end - start;
+        totalMinutes += Math.round((end - start) / 60_000);
       }
     }
   }
 
-  return Math.round(totalMs / 60_000); // ms → นาที
+  return totalMinutes;
 }
 
 function formatSleepDuration(minutes: number): string {
