@@ -62,36 +62,7 @@ jobs:
       - name: 🔨 Build TypeScript
         run: npm run build
 
-      # ─── Step 5: Notify Discord — Workflow Started ──────────────
-      # ส่งก่อนรัน เพื่อยืนยันว่า cron ทำงานจริง
-      - name: 📣 Notify Discord — Starting
-        run: |
-          TRIGGER="${{ github.event_name }}"
-          if [ "$TRIGGER" = "schedule" ]; then
-            TRIGGER_LABEL="⏰ ตั้งเวลาอัตโนมัติ (09:00 น.)"
-          elif [ "$TRIGGER" = "workflow_dispatch" ]; then
-            TRIGGER_LABEL="🖱️ รันด้วยมือ: ${{ github.event.inputs.reason }}"
-          else
-            TRIGGER_LABEL="🔀 Push to branch: ${{ github.ref_name }}"
-          fi
-
-          curl -s -X POST "${{ secrets.DISCORD_WEBHOOK_URL }}" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"username\": \"🏃 AI Health Coach\",
-              \"embeds\": [{
-                \"title\": \"⏳ กำลังดึงข้อมูลและวิเคราะห์...\",
-                \"description\": \"Workflow เริ่มทำงานแล้ว รอสักครู่นะครับ\",
-                \"color\": 3447003,
-                \"fields\": [
-                  { \"name\": \"สาเหตุที่รัน\", \"value\": \"${TRIGGER_LABEL}\", \"inline\": true },
-                  { \"name\": \"Run #\", \"value\": \"${{ github.run_number }}\", \"inline\": true }
-                ],
-                \"footer\": { \"text\": \"${{ github.repository }}\" }
-              }]
-            }"
-
-      # ─── Step 6: Run Health Coach ───────────────────────────────
+      # ─── Step 5: Run Health Coach ───────────────────────────────
       - name: 🏃 Run AI Health Coach
         id: health_coach
         run: npm start

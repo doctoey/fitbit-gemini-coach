@@ -42,12 +42,21 @@ function formatSleepForPrompt(
       const startUtc = interval?.["startTime"] as string | undefined;
       const endUtc = interval?.["endTime"] as string | undefined;
       const minutesAsleep = summary?.["minutesAsleep"] ?? "?";
-      const minutesInPeriod = summary?.["minutesInSleepPeriod"] ?? "?";
 
       const startThai = startUtc ? toThaiTime(startUtc) : "?";
       const endThai = endUtc ? toThaiTime(endUtc) : "?";
 
-      return `เข้านอน ${startThai} → ตื่น ${endThai} | หลับจริง ${minutesAsleep} นาที (ช่วงนอน ${minutesInPeriod} นาที)`;
+      let durationText = "";
+      if (minutesAsleep !== "?") {
+        const m = parseInt(String(minutesAsleep), 10);
+        const h = Math.floor(m / 60);
+        const mins = m % 60;
+        durationText = h > 0 ? `${h} ชั่วโมง ${mins} นาที` : `${mins} นาที`;
+      } else {
+        durationText = "ไม่มีข้อมูล";
+      }
+
+      return `เข้านอน ${startThai} → ตื่น ${endThai} (รวมเวลานอนหลับ: ${durationText})`;
     })
     .join("\n");
 }
@@ -75,7 +84,7 @@ function buildPrompt(health: HealthData): string {
 
 ## ข้อมูลสรุป
 - 👟 จำนวนก้าว: ${health.steps.toLocaleString()} ก้าว (${health.stepGoalPercent}% ของเป้าหมาย 10,000 ก้าว)
-- 😴 เวลานอน: ${health.sleepDurationFormatted} (${health.sleepDurationMinutes} นาที)
+- 😴 เวลานอน: ${health.sleepDurationFormatted}
 - ❤️  อัตราการเต้นหัวใจเฉลี่ย: ${health.heartRateAvg} bpm (ต่ำสุด ${health.heartRateMin} | สูงสุด ${health.heartRateMax})
 
 ## ช่วงเวลานอนหลับ (เวลาประเทศไทย GMT+7 แล้ว — ใช้ข้อมูลชุดนี้ในการวิเคราะห์)

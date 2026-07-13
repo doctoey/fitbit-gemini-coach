@@ -2,14 +2,10 @@
 // ส่งผลลัพธ์เข้า Discord Webhook พร้อม Embed สวยงาม
 //
 // โครงสร้าง Discord Embed:
-//   description  → Stats สั้นๆ (ก้าว / นอน / หัวใจ) ~150 chars เสมอ
-//   fields[]     → Gemini analysis แบ่งเป็น chunk ≤ 1024 chars โดยไม่พัง Markdown
+//   description  → Stats สั้นๆ + เส้นแบ่ง + บทวิเคราะห์จาก Gemini (เป็นผืนเดียวกัน สวยงาม ไม่ขัดตา)
 //
 // Discord limits:
-//   description  ≤ 4096 chars
-//   field.value  ≤ 1024 chars
-//   fields[]     ≤ 25 items per embed
-//   total embed  ≤ 6000 chars
+//   description  ≤ 4096 chars (ครอบคลุมทั้งหมด สบายๆ เพราะเราจำกัด maxOutputTokens ของ Gemini)
 
 import axios from "axios";
 import { DiscordPayload, HealthData } from "./types";
@@ -42,99 +38,53 @@ function progressBar(percent: number, total = 10): string {
   return "█".repeat(filled) + "░".repeat(total - filled) + ` ${percent}%`;
 }
 
-/** สร้าง stats header สั้นๆ สำหรับ embed description (~150 chars เสมอ) */
+/** สร้าง stats header สั้นๆ สำหรับ embed description */
 function buildStatsSection(health: HealthData): string {
   const stepBar = progressBar(Math.min(health.stepGoalPercent, 100));
   const sleepHr = (health.sleepDurationMinutes / 60).toFixed(1);
 
   return [
-    `📅 **รายงานสุขภาพ: ${health.date}**`,
+    `📅 **รายงานสุขภาพประจำวัน: ${health.date}**`,
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
     ``,
-    `**👟 ก้าวเดิน**`,
+    `**👟 การขยับร่างกาย (ก้าวเดิน)**`,
     `\`${stepBar}\``,
-    `${health.steps.toLocaleString()} / 10,000 ก้าว`,
+    `└─ **${health.steps.toLocaleString()}** / 10,000 ก้าว`,
     ``,
-    `**😴 การนอนหลับ**`,
-    `${health.sleepDurationFormatted} (${sleepHr} ชม.)`,
+    `**😴 การนอนหลับพักผ่อน**`,
+    `└─ **${health.sleepDurationFormatted}** (${sleepHr} ชม.)`,
     ``,
-    `**❤️ อัตราการเต้นหัวใจ**`,
-    `เฉลี่ย **${health.heartRateAvg}** bpm | ต่ำสุด ${health.heartRateMin} | สูงสุด ${health.heartRateMax}`,
+    `**❤️ อัตราการเต้นของหัวใจ**`,
+    `└─ เฉลี่ย **${health.heartRateAvg}** bpm (ช่วง: ${health.heartRateMin} - ${health.heartRateMax} bpm)`,
+    ``,
+    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+    `🤖 **บทวิเคราะห์และแนะนำโดย AI Coach**`,
+    ``
   ].join("\n");
 }
 
-// ─── Text Chunker ─────────────────────────────────────────────────────────────
+// ─── Safe String Truncate ─────────────────────────────────────────────────────
 
-/**
- * แบ่ง text ยาวเป็น chunk ≤ maxLen chars
- * พยายามตัดที่ขอบ paragraph (\n\n) ก่อน ถ้าไม่ได้ก็ตัดที่ \n แล้วค่อยตัดดื้อๆ
- */
-function splitIntoChunks(text: string, maxLen = 1024): string[] {
-  if (text.length <= maxLen) return [text.trim()];
-
-  const chunks: string[] = [];
-  let remaining = text.trim();
-
-  while (remaining.length > 0) {
-    if (remaining.length <= maxLen) {
-      chunks.push(remaining);
-      break;
-    }
-
-    const window = remaining.slice(0, maxLen);
-
-    // ลองตัดที่ \n\n (paragraph break) ก่อน
-    const paraBreak = window.lastIndexOf("\n\n");
-    if (paraBreak > maxLen * 0.5) {
-      chunks.push(remaining.slice(0, paraBreak).trim());
-      remaining = remaining.slice(paraBreak).trim();
-      continue;
-    }
-
-    // ลองตัดที่ \n (line break)
-    const lineBreak = window.lastIndexOf("\n");
-    if (lineBreak > maxLen * 0.5) {
-      chunks.push(remaining.slice(0, lineBreak).trim());
-      remaining = remaining.slice(lineBreak).trim();
-      continue;
-    }
-
-    // ตัดดื้อๆ
-    chunks.push(window.trim());
-    remaining = remaining.slice(maxLen).trim();
+/** ตัดคำแบบปลอดภัย ไม่ให้ markdown พังกรณีเกิน limit 4096 */
+function safeTruncate(text: string, maxLen = 4096): string {
+  if (text.length <= maxLen) return text;
+  
+  // ตัดลงมาให้ปลอดภัย เผื่อพื้นที่ใส่คำว่า ...
+  let truncated = text.slice(0, maxLen - 100);
+  
+  // ตรวจสอบพวก code block หรือ markdown tags ที่อาจจะเปิดค้างไว้
+  const codeBlockCount = (truncated.match(/```/g) || []).length;
+  if (codeBlockCount % 2 !== 0) {
+    truncated += "\n```"; // ปิด code block ที่ค้างไว้
   }
-
-  return chunks.filter((c) => c.length > 0);
-}
-
-// ─── Discord Embed Fields ─────────────────────────────────────────────────────
-
-interface EmbedField {
-  name: string;
-  value: string;
-  inline?: boolean;
-}
-
-/**
- * แปลง Gemini analysis text เป็น embed fields
- * ใช้ zero-width space (\u200b) เป็นชื่อ field continuation
- */
-function buildAnalysisFields(geminiAnalysis: string): EmbedField[] {
-  const chunks = splitIntoChunks(geminiAnalysis, 1024);
-  return chunks.map((chunk, i) => ({
-    name: i === 0 ? "🤖 วิเคราะห์โดย Gemini" : "\u200b",
-    value: chunk,
-    inline: false,
-  }));
+  
+  return truncated + "\n\n*(เนื้อหาบางส่วนถูกละไว้เนื่องจากยาวเกินกำหนด)*";
 }
 
 // ─── Main Export ──────────────────────────────────────────────────────────────
 
 /**
  * ส่งรายงานสุขภาพพร้อม Gemini analysis เข้า Discord Webhook
- *
- * โครงสร้าง:
- *   embed.description = stats summary (สั้น, ปลอดภัยจาก limit เสมอ)
- *   embed.fields[]    = Gemini analysis (แบ่ง chunk อัตโนมัติ ≤ 1024 chars/field)
  */
 export async function sendToDiscord(
   health: HealthData,
@@ -147,19 +97,26 @@ export async function sendToDiscord(
 
   console.log("📨 กำลังส่งรายงานเข้า Discord...");
 
-  const description = buildStatsSection(health);
-  const fields = buildAnalysisFields(geminiAnalysis);
+  const statsSection = buildStatsSection(health);
+  const fullDescription = statsSection + geminiAnalysis;
+  const description = safeTruncate(fullDescription, 4096);
+
+  // หาวันที่และเวลาปัจจุบันของไทยเพื่อแสดงใน footer
+  const bangkokTimeStr = new Date().toLocaleString("th-TH", {
+    timeZone: "Asia/Bangkok",
+    dateStyle: "medium",
+    timeStyle: "short",
+  }) + " น.";
 
   const payload: DiscordPayload = {
     username: "🏃 AI Health Coach",
     embeds: [
       {
-        title: "🌅 รายงานสุขภาพประจำวัน",
+        title: "🌅 Daily Health Summary",
         description,
         color: pickColor(health),
-        fields,
         footer: {
-          text: `วิเคราะห์โดย Gemini AI • ข้อมูลจาก Google Fit`,
+          text: `วิเคราะห์โดย Gemini AI • ข้อมูลจาก Google Fit • อัปเดตเมื่อ ${bangkokTimeStr}`,
         },
         timestamp: new Date().toISOString(),
       },
@@ -185,13 +142,13 @@ export async function sendErrorToDiscord(error: Error): Promise<void> {
       username: "🏃 AI Health Coach",
       embeds: [
         {
-          title: "⚠️ เกิดข้อผิดพลาด",
+          title: "⚠️ เกิดข้อผิดพลาดในระบบ",
           description: [
-            `วันนี้รายงานสุขภาพส่งไม่ได้ เนื่องจากข้อผิดพลาดดังนี้:`,
+            `วันนี้ไม่สามารถสร้างรายงานสุขภาพได้ เนื่องจากระบบขัดข้อง:`,
             `\`\`\``,
             error.message,
             `\`\`\``,
-            `กรุณาตรวจสอบ log และ environment variables`,
+            `กรุณาตรวจสอบระบบหลังบ้านและ Logs บน GitHub Actions`,
           ].join("\n"),
           color: 0xe74c3c,
           timestamp: new Date().toISOString(),
