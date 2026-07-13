@@ -82,9 +82,22 @@ export async function analyzeWithGemini(health: HealthData): Promise<string> {
     },
   };
 
-  const response = await axios.post<GeminiResponse>(url, requestBody, {
-    headers: { "Content-Type": "application/json" },
-  });
+  // log URL เพื่อให้ debug ได้ถ้า 404 (ไม่ log apiKey จริง เพื่อ security)
+  const urlForLog = `${GEMINI_BASE}/${GEMINI_MODEL}:generateContent?key=***`;
+  console.log(`   URL: ${urlForLog}`);
+
+  let response;
+  try {
+    response = await axios.post<GeminiResponse>(url, requestBody, {
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    if (axios.isAxiosError(err) && err.response) {
+      console.error(`❌ Gemini Error ${err.response.status}:`);
+      console.error("   Detail:", JSON.stringify(err.response.data, null, 2));
+    }
+    throw err;
+  }
 
   const candidate = response.data.candidates?.[0];
   if (!candidate) {

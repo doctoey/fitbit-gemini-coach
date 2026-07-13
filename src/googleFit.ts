@@ -137,12 +137,19 @@ async function fetchSleepReconcile(
   const url = `${HEALTH_BASE}/users/me/dataTypes/sleep/dataPoints:reconcile`;
 
   // แปลง Bangkok midnight เป็น UTC milliseconds สำหรับ client-side filter
+  // เมื่อวาน Bangkok = [YYYY-MM-DDT00:00:00+07:00, YYYY-MM-DD+1T00:00:00+07:00)
   const startMs = new Date(`${startDate}T00:00:00+07:00`).getTime();
   const endMs   = new Date(`${endDate}T00:00:00+07:00`).getTime();
 
+  console.log(`    ↳ UTC window: ${new Date(startMs).toISOString()} → ${new Date(endMs).toISOString()}`);
+
   try {
     // ไม่ส่ง filter — ดึงทุก session ที่มี (max 25 สำหรับ sleep)
-    // แล้ว filter วันที่ฝั่ง client ตาม UTC range ของ Bangkok midnight
+    // filter ฝั่ง client โดยดู endTime (เวลาตื่น) ว่าอยู่ใน window เมื่อวานไหม
+    // ⚠️  ใช้ endTime ไม่ใช่ startTime:
+    //     คนนอนก่อนเที่ยงคืน (เช่น 23:00 Bangkok Jul-12)
+    //     → startTime = Jul-11 16:00 UTC (ก่อน window)
+    //     → endTime   = Jul-12 00:30 UTC (อยู่ใน window) ← อันนี้ถูก
     const response = await axios.get<SleepReconcileResponse>(url, {
       headers: { Authorization: `Bearer ${accessToken}` },
       params: { pageSize: 25 },
@@ -150,15 +157,26 @@ async function fetchSleepReconcile(
 
     const allPoints = response.data.dataPoints ?? [];
 
-    // กรองเฉพาะ session ที่เริ่มใน range เมื่อวานของ Bangkok
+    // แสดง timestamp ของทุก session เพื่อ debug
+    if (allPoints.length > 0) {
+      console.log(`    ↳ Sessions ทั้งหมด:`);
+      allPoints.forEach((p, i) => {
+        console.log(`       [${i}] start=${p.startTime ?? "?"}  end=${p.endTime ?? "?"}`);
+      });
+    }
+
+    // กรองโดยดู endTime ว่าอยู่ใน window เมื่อวาน Bangkok
     const yesterdayPoints = allPoints.filter((point) => {
-      if (!point.startTime) return false;
-      const t = new Date(point.startTime).getTime();
-      return t >= startMs && t < endMs;
+      const endT   = point.endTime   ? new Date(point.endTime).getTime()   : null;
+      const startT = point.startTime ? new Date(point.startTime).getTime() : null;
+      if (endT === null || startT === null) return false;
+      // session ที่ตื่น (endTime) อยู่ใน window เมื่อวาน
+      // และเริ่มนอน (startTime) ก่อนสิ้นสุด window (ป้องกัน nap สั้นในวันอื่น)
+      return endT > startMs && endT <= endMs && startT < endMs;
     });
 
     console.log(
-      `    ↳ พบ sleep session ทั้งหมด ${allPoints.length} รายการ → กรองเหลือ ${yesterdayPoints.length} รายการ`
+      `    ↳ กรองเหลือ ${yesterdayPoints.length} รายการที่ตรงวันที่ ${startDate}`
     );
 
     return { dataPoints: yesterdayPoints, nextPageToken: undefined };
