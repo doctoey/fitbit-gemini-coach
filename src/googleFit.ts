@@ -125,34 +125,48 @@ async function fetchDailyRollUp(
  * ดึงข้อมูล Sleep ผ่าน reconcile endpoint (GET)
  *
  * Endpoint: GET /v4/users/me/dataTypes/sleep/dataPoints:reconcile
- * Filter:   civil_time >= "YYYY-MM-DD" AND civil_time < "YYYY-MM-DD+1"
  *
- * หมายเหตุ: sleep ไม่รองรับ dailyRollUp — ต้องใช้ reconcile แทน
- * Allowed actions: list, get, reconcile, create, update, batchDelete
+ * ⚠️  ไม่ใช้ filter parameter เพราะ AIP-160 field name ของ sleep ไม่มีเอกสาร
+ *     ดึง sessions ล่าสุดทั้งหมด (max 25) แล้ว filter วันที่ฝั่ง client แทน
  */
 async function fetchSleepReconcile(
   accessToken: string,
-  startDate: string,  // "YYYY-MM-DD"
-  endDate: string     // "YYYY-MM-DD" วันถัดไป (exclusive)
+  startDate: string,  // "YYYY-MM-DD" (yesterday ใน Bangkok time)
+  endDate: string     // "YYYY-MM-DD" (today ใน Bangkok time — exclusive)
 ): Promise<SleepReconcileResponse> {
   const url = `${HEALTH_BASE}/users/me/dataTypes/sleep/dataPoints:reconcile`;
 
-  // AIP-160 filter syntax สำหรับ civil time (ไม่ใช่ UTC timestamp)
-  const filter = `civil_time >= "${startDate}" AND civil_time < "${endDate}"`;
+  // แปลง Bangkok midnight เป็น UTC milliseconds สำหรับ client-side filter
+  const startMs = new Date(`${startDate}T00:00:00+07:00`).getTime();
+  const endMs   = new Date(`${endDate}T00:00:00+07:00`).getTime();
 
   try {
+    // ไม่ส่ง filter — ดึงทุก session ที่มี (max 25 สำหรับ sleep)
+    // แล้ว filter วันที่ฝั่ง client ตาม UTC range ของ Bangkok midnight
     const response = await axios.get<SleepReconcileResponse>(url, {
       headers: { Authorization: `Bearer ${accessToken}` },
-      params: {
-        filter,
-        pageSize: 25, // max สำหรับ sleep
-      },
+      params: { pageSize: 25 },
     });
-    return response.data;
+
+    const allPoints = response.data.dataPoints ?? [];
+
+    // กรองเฉพาะ session ที่เริ่มใน range เมื่อวานของ Bangkok
+    const yesterdayPoints = allPoints.filter((point) => {
+      if (!point.startTime) return false;
+      const t = new Date(point.startTime).getTime();
+      return t >= startMs && t < endMs;
+    });
+
+    console.log(
+      `    ↳ พบ sleep session ทั้งหมด ${allPoints.length} รายการ → กรองเหลือ ${yesterdayPoints.length} รายการ`
+    );
+
+    return { dataPoints: yesterdayPoints, nextPageToken: undefined };
   } catch (error) {
     handleApiError("reconcile/sleep", error);
   }
 }
+
 
 // ─── Parsers ─────────────────────────────────────────────────────────────────
 
