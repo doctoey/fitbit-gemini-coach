@@ -42,6 +42,71 @@ function pickColor(health: HealthData): number {
 
 // ─── Stats Section ────────────────────────────────────────────────────────────
 
+interface SleepStages {
+  deep: number;
+  rem: number;
+  light: number;
+  awake: number;
+  restless: number;
+}
+
+function parseSleepStagesForDate(health: HealthData): SleepStages {
+  const dateStr = health.date;
+  const d = new Date(dateStr);
+  const nextDay = new Date(d.getTime() + 24 * 60 * 60 * 1000);
+  const nextDayStr = `${nextDay.getFullYear()}-${String(nextDay.getMonth() + 1).padStart(2, "0")}-${String(nextDay.getDate()).padStart(2, "0")}`;
+
+  // หน้าต่างเวลาเดียวกับที่ใช้ใน parseSleepMinutesForDate (googleFit.ts)
+  const sleepStartMs = new Date(`${dateStr}T18:00:00+07:00`).getTime();
+  const sleepEndMs = new Date(`${nextDayStr}T13:00:00+07:00`).getTime();
+
+  const stages: SleepStages = { deep: 0, rem: 0, light: 0, awake: 0, restless: 0 };
+  const allPoints = health.rawData.sleep?.dataPoints ?? [];
+
+  for (const point of allPoints) {
+    const p = point as any;
+    const sleepObj = p.sleep;
+    if (!sleepObj) continue;
+
+    const interval = sleepObj.interval;
+    const startStr = interval?.startTime;
+    const endStr = interval?.endTime;
+    if (!startStr || !endStr) continue;
+
+    const startT = new Date(startStr).getTime();
+    const endT = new Date(endStr).getTime();
+
+    // กรองเอาเฉพาะ session การนอนของวันดังกล่าว
+    if (startT >= sleepStartMs && endT <= sleepEndMs) {
+      const rawStages = sleepObj.stages;
+      if (Array.isArray(rawStages)) {
+        for (const s of rawStages) {
+          const sStart = new Date(s.startTime).getTime();
+          const sEnd = new Date(s.endTime).getTime();
+          if (isNaN(sStart) || !sEnd || isNaN(sEnd)) continue;
+
+          const minutes = Math.round((sEnd - sStart) / 60_000);
+          const type = String(s.type).toUpperCase();
+
+          if (type === "DEEP") {
+            stages.deep += minutes;
+          } else if (type === "REM") {
+            stages.rem += minutes;
+          } else if (type === "LIGHT") {
+            stages.light += minutes;
+          } else if (type === "AWAKE") {
+            stages.awake += minutes;
+          } else if (type === "RESTLESS") {
+            stages.restless += minutes;
+          }
+        }
+      }
+    }
+  }
+
+  return stages;
+}
+
 function progressBar(percent: number, total = 10): string {
   const filled = Math.min(Math.round((percent / 100) * total), total);
   return "█".repeat(filled) + "░".repeat(total - filled) + ` ${percent}%`;
@@ -54,6 +119,33 @@ function buildStatsSection(health: HealthData): string {
       ? `**${health.restingHeartRate}** bpm`
       : "ไม่มีข้อมูล";
 
+  const stages = parseSleepStagesForDate(health);
+  const hasStages =
+    stages.deep > 0 ||
+    stages.rem > 0 ||
+    stages.light > 0 ||
+    stages.restless > 0 ||
+    stages.awake > 0;
+
+  const sleepLines = [
+    `**😴 การนอนหลับพักผ่อน**`,
+    `└─ **${health.sleepDurationFormatted}**`,
+  ];
+  if (hasStages) {
+    const stagesList: { label: string; value: number }[] = [];
+    if (stages.deep > 0) stagesList.push({ label: "Deep Sleep", value: stages.deep });
+    if (stages.rem > 0) stagesList.push({ label: "REM Sleep", value: stages.rem });
+    if (stages.light > 0) stagesList.push({ label: "Light Sleep", value: stages.light });
+    if (stages.restless > 0) stagesList.push({ label: "Restlessness", value: stages.restless });
+    if (stages.awake > 0) stagesList.push({ label: "Awake", value: stages.awake });
+
+    stagesList.forEach((stage, idx) => {
+      const isLast = idx === stagesList.length - 1;
+      const prefix = isLast ? "   └─" : "   ├─";
+      sleepLines.push(`${prefix} ${stage.label}: **${stage.value}** นาที`);
+    });
+  }
+
   return [
     `📅 **รายงานสุขภาพประจำวัน: ${health.date}**`,
     `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
@@ -62,8 +154,7 @@ function buildStatsSection(health: HealthData): string {
     `\`${stepBar}\``,
     `└─ **${health.steps.toLocaleString()}** / 10,000 ก้าว`,
     ``,
-    `**😴 การนอนหลับพักผ่อน**`,
-    `└─ **${health.sleepDurationFormatted}**`,
+    ...sleepLines,
     ``,
     `**❤️ อัตราการเต้นของหัวใจ**`,
     `├─ เฉลี่ย **${health.heartRateAvg}** bpm (ช่วง: ${health.heartRateMin} - ${health.heartRateMax} bpm)`,
