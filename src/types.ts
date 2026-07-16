@@ -121,6 +121,12 @@ export interface DailyRollUpResponse {
  * Response จาก reconcile endpoint — ใช้กับ sleep
  * sleep ไม่รองรับ dailyRollUp — ต้องดึงผ่าน reconcile (GET)
  */
+export interface SleepStage {
+  startTime?: string;
+  endTime?: string;
+  type?: string;
+}
+
 export interface SleepDataPoint {
   name?: string;
   startTime?: string; // RFC 3339 datetime
@@ -135,6 +141,7 @@ export interface SleepDataPoint {
       minutesInSleepPeriod?: string; // int64 string
       minutesAwake?: string; // int64 string
     };
+    stages?: SleepStage[];
   };
   [key: string]: unknown;
 }

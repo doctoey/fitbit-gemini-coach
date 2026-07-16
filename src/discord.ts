@@ -42,7 +42,7 @@ function pickColor(health: HealthData): number {
 
 // ─── Stats Section ────────────────────────────────────────────────────────────
 
-interface SleepStages {
+export interface SleepStages {
   deep: number;
   rem: number;
   light: number;
@@ -50,7 +50,7 @@ interface SleepStages {
   restless: number;
 }
 
-function parseSleepStagesForDate(health: HealthData): SleepStages {
+export function parseSleepStagesForDate(health: HealthData): SleepStages {
   const dateStr = health.date;
   const d = new Date(dateStr);
   const nextDay = new Date(d.getTime() + 24 * 60 * 60 * 1000);
@@ -112,7 +112,7 @@ function progressBar(percent: number, total = 10): string {
   return "█".repeat(filled) + "░".repeat(total - filled) + ` ${percent}%`;
 }
 
-function buildStatsSection(health: HealthData): string {
+export function buildStatsSection(health: HealthData): string {
   const stepBar = progressBar(Math.min(health.stepGoalPercent, 100));
   const rhrStr =
     health.restingHeartRate > 0
@@ -176,7 +176,7 @@ function buildStatsSection(health: HealthData): string {
 // ─── Safe String Truncate ─────────────────────────────────────────────────────
 
 /** ตัดคำแบบปลอดภัย ไม่ให้ markdown พังกรณีเกิน limit 4096 */
-function safeTruncate(text: string, maxLen = 4096): string {
+export function safeTruncate(text: string, maxLen = 4096): string {
   if (text.length <= maxLen) return text;
 
   // ตัดลงมาให้ปลอดภัย เผื่อพื้นที่ใส่คำว่า ...
@@ -193,7 +193,7 @@ function safeTruncate(text: string, maxLen = 4096): string {
 
 // ─── Main Exports ────────────────────────────────────────────────────────────
 
-function getFormattedFooterText(baseText: string): string {
+export function getFormattedFooterText(baseText: string): string {
   const now = new Date();
   const dateStr = new Intl.DateTimeFormat("th-TH", {
     timeZone: "Asia/Bangkok",
