@@ -193,6 +193,25 @@ function safeTruncate(text: string, maxLen = 4096): string {
 
 // ─── Main Exports ────────────────────────────────────────────────────────────
 
+function getFormattedFooterText(baseText: string): string {
+  const now = new Date();
+  const dateStr = new Intl.DateTimeFormat("th-TH", {
+    timeZone: "Asia/Bangkok",
+    day: "numeric",
+    month: "short",
+    year: "2-digit",
+  }).format(now);
+
+  const timeStr = new Intl.DateTimeFormat("th-TH", {
+    timeZone: "Asia/Bangkok",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(now);
+
+  return `${baseText} • ${dateStr} • ${timeStr} น.`;
+}
+
 /**
  * ส่งรายงานสุขภาพพร้อม Gemini analysis เข้า Discord Webhook
  */
@@ -219,9 +238,8 @@ export async function sendToDiscord(
         description,
         color: pickColor(health),
         footer: {
-          text: `วิเคราะห์โดย Gemini AI • ข้อมูลจาก Google Fit`,
+          text: getFormattedFooterText("วิเคราะห์โดย Gemini AI • ข้อมูลจาก Google Fit"),
         },
-        timestamp: new Date().toISOString(),
       },
     ],
   };
@@ -293,9 +311,8 @@ export async function sendWeeklyReportToDiscord(
         description,
         color: weeklyColor,
         footer: {
-          text: `สรุปรายสัปดาห์โดย Gemini AI • ข้อมูลจาก Google Fit`,
+          text: getFormattedFooterText("สรุปรายสัปดาห์โดย Gemini AI • ข้อมูลจาก Google Fit"),
         },
-        timestamp: new Date().toISOString(),
       },
     ],
   };
