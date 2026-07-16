@@ -42,42 +42,133 @@ function pickColor(health: HealthData): number {
 
 // ─── Stats Section ────────────────────────────────────────────────────────────
 
+export interface SleepStages {
+  deep: number;
+  rem: number;
+  light: number;
+  awake: number;
+  restless: number;
+}
+
+export function parseSleepStagesForDate(health: HealthData): SleepStages {
+  const dateStr = health.date;
+  const d = new Date(dateStr);
+  const nextDay = new Date(d.getTime() + 24 * 60 * 60 * 1000);
+  const nextDayStr = `${nextDay.getFullYear()}-${String(nextDay.getMonth() + 1).padStart(2, "0")}-${String(nextDay.getDate()).padStart(2, "0")}`;
+
+  // หน้าต่างเวลาเดียวกับที่ใช้ใน parseSleepMinutesForDate (googleFit.ts)
+  const sleepStartMs = new Date(`${dateStr}T18:00:00+07:00`).getTime();
+  const sleepEndMs = new Date(`${nextDayStr}T13:00:00+07:00`).getTime();
+
+  const stages: SleepStages = { deep: 0, rem: 0, light: 0, awake: 0, restless: 0 };
+  const allPoints = health.rawData.sleep?.dataPoints ?? [];
+
+  for (const point of allPoints) {
+    const p = point as any;
+    const sleepObj = p.sleep;
+    if (!sleepObj) continue;
+
+    const interval = sleepObj.interval;
+    const startStr = interval?.startTime;
+    const endStr = interval?.endTime;
+    if (!startStr || !endStr) continue;
+
+    const startT = new Date(startStr).getTime();
+    const endT = new Date(endStr).getTime();
+
+    // กรองเอาเฉพาะ session การนอนของวันดังกล่าว
+    if (startT >= sleepStartMs && endT <= sleepEndMs) {
+      const rawStages = sleepObj.stages;
+      if (Array.isArray(rawStages)) {
+        for (const s of rawStages) {
+          const sStart = new Date(s.startTime).getTime();
+          const sEnd = new Date(s.endTime).getTime();
+          if (isNaN(sStart) || !sEnd || isNaN(sEnd)) continue;
+
+          const minutes = Math.round((sEnd - sStart) / 60_000);
+          const type = String(s.type).toUpperCase();
+
+          if (type === "DEEP") {
+            stages.deep += minutes;
+          } else if (type === "REM") {
+            stages.rem += minutes;
+          } else if (type === "LIGHT") {
+            stages.light += minutes;
+          } else if (type === "AWAKE") {
+            stages.awake += minutes;
+          } else if (type === "RESTLESS") {
+            stages.restless += minutes;
+          }
+        }
+      }
+    }
+  }
+
+  return stages;
+}
+
 function progressBar(percent: number, total = 10): string {
   const filled = Math.min(Math.round((percent / 100) * total), total);
   return "█".repeat(filled) + "░".repeat(total - filled) + ` ${percent}%`;
 }
 
-function buildStatsSection(health: HealthData): string {
+export function buildStatsSection(health: HealthData): string {
   const stepBar = progressBar(Math.min(health.stepGoalPercent, 100));
   const rhrStr =
     health.restingHeartRate > 0
       ? `**${health.restingHeartRate}** bpm`
       : "ไม่มีข้อมูล";
 
+  const stages = parseSleepStagesForDate(health);
+  const hasStages =
+    stages.deep > 0 ||
+    stages.rem > 0 ||
+    stages.light > 0 ||
+    stages.restless > 0 ||
+    stages.awake > 0;
+
+  const sleepLines = [
+    `▪ **SLEEP**`,
+    `└─ **${health.sleepDurationFormatted}**`,
+  ];
+  if (hasStages) {
+    const stagesList: { label: string; value: number }[] = [];
+    if (stages.deep > 0) stagesList.push({ label: "Deep Sleep", value: stages.deep });
+    if (stages.rem > 0) stagesList.push({ label: "REM Sleep", value: stages.rem });
+    if (stages.light > 0) stagesList.push({ label: "Light Sleep", value: stages.light });
+    if (stages.restless > 0) stagesList.push({ label: "Restlessness", value: stages.restless });
+    if (stages.awake > 0) stagesList.push({ label: "Awake", value: stages.awake });
+
+    stagesList.forEach((stage, idx) => {
+      const isLast = idx === stagesList.length - 1;
+      const prefix = isLast ? "   └─" : "   ├─";
+      sleepLines.push(`${prefix} ${stage.label}: **${stage.value}** นาที`);
+    });
+  }
+
   return [
-    `📅 **รายงานสุขภาพประจำวัน: ${health.date}**`,
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+    `◆ **DAILY HEALTH REPORT • ${health.date}**`,
+    `────────────────────────────────────────`,
     ``,
-    `**👟 การขยับร่างกาย (ก้าวเดิน)**`,
+    `▪ **ACTIVITY**`,
     `\`${stepBar}\``,
     `└─ **${health.steps.toLocaleString()}** / 10,000 ก้าว`,
     ``,
-    `**😴 การนอนหลับพักผ่อน**`,
-    `└─ **${health.sleepDurationFormatted}**`,
+    ...sleepLines,
     ``,
-    `**❤️ อัตราการเต้นของหัวใจ**`,
+    `▪ **HEART RATE**`,
     `├─ เฉลี่ย **${health.heartRateAvg}** bpm (ช่วง: ${health.heartRateMin} - ${health.heartRateMax} bpm)`,
     `└─ ชีพจรขณะพัก (RHR): ${rhrStr}`,
     ``,
-    `**⚡ Active Zone Minutes**`,
+    `▪ **ACTIVE ZONE**`,
     `└─ รวม **${health.activeZoneMinutesTotal}** นาที (Fat Burn: ${health.activeZoneMinutesDetails.fatBurn} | Cardio: ${health.activeZoneMinutesDetails.cardio} | Peak: ${health.activeZoneMinutesDetails.peak})`,
     ``,
-    `**🔥 พลังงานที่เผาผลาญ**`,
+    `▪ **CALORIES**`,
     `└─ **${health.totalCalories.toLocaleString()}** kcal`,
     ``,
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+    `────────────────────────────────────────`,
     ``,
-    `🤖 **บทวิเคราะห์และแนะนำโดย AI Coach**`,
+    `◆ **AI COACH ANALYSIS**`,
     ``,
   ].join("\n");
 }
@@ -85,7 +176,7 @@ function buildStatsSection(health: HealthData): string {
 // ─── Safe String Truncate ─────────────────────────────────────────────────────
 
 /** ตัดคำแบบปลอดภัย ไม่ให้ markdown พังกรณีเกิน limit 4096 */
-function safeTruncate(text: string, maxLen = 4096): string {
+export function safeTruncate(text: string, maxLen = 4096): string {
   if (text.length <= maxLen) return text;
 
   // ตัดลงมาให้ปลอดภัย เผื่อพื้นที่ใส่คำว่า ...
@@ -101,6 +192,25 @@ function safeTruncate(text: string, maxLen = 4096): string {
 }
 
 // ─── Main Exports ────────────────────────────────────────────────────────────
+
+export function getFormattedFooterText(baseText: string): string {
+  const now = new Date();
+  const dateStr = new Intl.DateTimeFormat("th-TH", {
+    timeZone: "Asia/Bangkok",
+    day: "numeric",
+    month: "short",
+    year: "2-digit",
+  }).format(now);
+
+  const timeStr = new Intl.DateTimeFormat("th-TH", {
+    timeZone: "Asia/Bangkok",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(now);
+
+  return `${baseText} • ${dateStr} • ${timeStr} น.`;
+}
 
 /**
  * ส่งรายงานสุขภาพพร้อม Gemini analysis เข้า Discord Webhook
@@ -128,9 +238,8 @@ export async function sendToDiscord(
         description,
         color: pickColor(health),
         footer: {
-          text: `วิเคราะห์โดย Gemini AI • ข้อมูลจาก Google Fit`,
+          text: getFormattedFooterText("วิเคราะห์โดย Gemini AI • ข้อมูลจาก Google Fit"),
         },
-        timestamp: new Date().toISOString(),
       },
     ],
   };
@@ -176,18 +285,18 @@ export async function sendWeeklyReportToDiscord(
   else if (avgSteps < 4000) weeklyColor = COLOR.POOR;
 
   const statsSection = [
-    `📅 **ช่วงวันที่: ${dateRangeStr}**`,
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+    `◆ **WEEKLY HEALTH REPORT • ${weeklyData[0].date} To ${weeklyData[weeklyData.length - 1].date}**`,
+    `────────────────────────────────────────`,
     ``,
-    `🏆 **สรุปสถิติเฉลี่ยและยอดรวมสะสม**`,
-    `├─ 👟 ก้าวเดินเฉลี่ยต่อวัน: **${avgSteps.toLocaleString()}** ก้าว/วัน`,
-    `├─ 😴 นอนหลับเฉลี่ยต่อวัน: **${avgSleepFormatted}**`,
-    `├─ ⚡ Active Zone Minutes รวม: **${totalActiveMins}** นาที`,
-    `└─ 🔥 เผาผลาญแคลอรี่รวม: **${totalCalories.toLocaleString()}** kcal`,
+    `▪ **WEEKLY STATS SUMMARY**`,
+    `├─ ก้าวเดินเฉลี่ยต่อวัน: **${avgSteps.toLocaleString()}** ก้าว/วัน`,
+    `├─ นอนหลับเฉลี่ยต่อวัน: **${avgSleepFormatted}**`,
+    `├─ Active Zone Minutes รวม: **${totalActiveMins}** นาที`,
+    `└─ เผาผลาญแคลอรี่รวม: **${totalCalories.toLocaleString()}** kcal`,
     ``,
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+    `────────────────────────────────────────`,
     ``,
-    `📊 **วิเคราะห์แนวโน้มสุขภาพรายสัปดาห์**`,
+    `◆ **AI COACH ANALYSIS**`,
     ``,
   ].join("\n");
 
@@ -202,9 +311,8 @@ export async function sendWeeklyReportToDiscord(
         description,
         color: weeklyColor,
         footer: {
-          text: `สรุปรายสัปดาห์โดย Gemini AI • ข้อมูลจาก Google Fit`,
+          text: getFormattedFooterText("สรุปรายสัปดาห์โดย Gemini AI • ข้อมูลจาก Google Fit"),
         },
-        timestamp: new Date().toISOString(),
       },
     ],
   };
