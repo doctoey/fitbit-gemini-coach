@@ -128,7 +128,7 @@ function buildStatsSection(health: HealthData): string {
     stages.awake > 0;
 
   const sleepLines = [
-    `**😴 การนอนหลับพักผ่อน**`,
+    `▪ **SLEEP**`,
     `└─ **${health.sleepDurationFormatted}**`,
   ];
   if (hasStages) {
@@ -147,28 +147,28 @@ function buildStatsSection(health: HealthData): string {
   }
 
   return [
-    `📅 **รายงานสุขภาพประจำวัน: ${health.date}**`,
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+    `◆ **DAILY HEALTH REPORT • ${health.date}**`,
+    `────────────────────────────────────────`,
     ``,
-    `**👟 การขยับร่างกาย (ก้าวเดิน)**`,
+    `▪ **ACTIVITY**`,
     `\`${stepBar}\``,
     `└─ **${health.steps.toLocaleString()}** / 10,000 ก้าว`,
     ``,
     ...sleepLines,
     ``,
-    `**❤️ อัตราการเต้นของหัวใจ**`,
+    `▪ **HEART RATE**`,
     `├─ เฉลี่ย **${health.heartRateAvg}** bpm (ช่วง: ${health.heartRateMin} - ${health.heartRateMax} bpm)`,
     `└─ ชีพจรขณะพัก (RHR): ${rhrStr}`,
     ``,
-    `**⚡ Active Zone Minutes**`,
+    `▪ **ACTIVE ZONE**`,
     `└─ รวม **${health.activeZoneMinutesTotal}** นาที (Fat Burn: ${health.activeZoneMinutesDetails.fatBurn} | Cardio: ${health.activeZoneMinutesDetails.cardio} | Peak: ${health.activeZoneMinutesDetails.peak})`,
     ``,
-    `**🔥 พลังงานที่เผาผลาญ**`,
+    `▪ **CALORIES**`,
     `└─ **${health.totalCalories.toLocaleString()}** kcal`,
     ``,
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+    `────────────────────────────────────────`,
     ``,
-    `🤖 **บทวิเคราะห์และแนะนำโดย AI Coach**`,
+    `◆ **AI COACH ANALYSIS**`,
     ``,
   ].join("\n");
 }
@@ -267,18 +267,18 @@ export async function sendWeeklyReportToDiscord(
   else if (avgSteps < 4000) weeklyColor = COLOR.POOR;
 
   const statsSection = [
-    `📅 **ช่วงวันที่: ${dateRangeStr}**`,
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+    `◆ **WEEKLY HEALTH REPORT • ${weeklyData[0].date} To ${weeklyData[weeklyData.length - 1].date}**`,
+    `────────────────────────────────────────`,
     ``,
-    `🏆 **สรุปสถิติเฉลี่ยและยอดรวมสะสม**`,
-    `├─ 👟 ก้าวเดินเฉลี่ยต่อวัน: **${avgSteps.toLocaleString()}** ก้าว/วัน`,
-    `├─ 😴 นอนหลับเฉลี่ยต่อวัน: **${avgSleepFormatted}**`,
-    `├─ ⚡ Active Zone Minutes รวม: **${totalActiveMins}** นาที`,
-    `└─ 🔥 เผาผลาญแคลอรี่รวม: **${totalCalories.toLocaleString()}** kcal`,
+    `▪ **WEEKLY STATS SUMMARY**`,
+    `├─ ก้าวเดินเฉลี่ยต่อวัน: **${avgSteps.toLocaleString()}** ก้าว/วัน`,
+    `├─ นอนหลับเฉลี่ยต่อวัน: **${avgSleepFormatted}**`,
+    `├─ Active Zone Minutes รวม: **${totalActiveMins}** นาที`,
+    `└─ เผาผลาญแคลอรี่รวม: **${totalCalories.toLocaleString()}** kcal`,
     ``,
-    `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+    `────────────────────────────────────────`,
     ``,
-    `📊 **วิเคราะห์แนวโน้มสุขภาพรายสัปดาห์**`,
+    `◆ **AI COACH ANALYSIS**`,
     ``,
   ].join("\n");
 
