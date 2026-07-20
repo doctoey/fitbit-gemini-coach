@@ -17,6 +17,7 @@ import {
   DailyRollupDataPoint,
   RestingHeartRateReconcileResponse,
   RestingHeartRateDataPoint,
+  SleepStages,
 } from "./types";
 
 const HEALTH_BASE = "https://health.googleapis.com/v4";
@@ -329,6 +330,64 @@ export function parseSleepMinutesForDate(
   return totalMinutes;
 }
 
+export function parseSleepStagesForDate(
+  allPoints: SleepDataPoint[],
+  dateStr: string,
+): SleepStages {
+  const d = new Date(dateStr);
+  const nextDay = new Date(d.getTime() + 24 * 60 * 60 * 1000);
+  const nextDayStr = `${nextDay.getFullYear()}-${String(nextDay.getMonth() + 1).padStart(2, "0")}-${String(nextDay.getDate()).padStart(2, "0")}`;
+
+  // หน้าต่างเวลาเดียวกับที่ใช้ใน parseSleepMinutesForDate (googleFit.ts)
+  const sleepStartMs = new Date(`${dateStr}T18:00:00+07:00`).getTime();
+  const sleepEndMs = new Date(`${nextDayStr}T13:00:00+07:00`).getTime();
+
+  const stages: SleepStages = { deep: 0, rem: 0, light: 0, awake: 0, restless: 0 };
+
+  for (const point of allPoints) {
+    const p = point as any;
+    const sleepObj = p.sleep;
+    if (!sleepObj) continue;
+
+    const interval = sleepObj.interval;
+    const startStr = interval?.startTime;
+    const endStr = interval?.endTime;
+    if (!startStr || !endStr) continue;
+
+    const startT = new Date(startStr).getTime();
+    const endT = new Date(endStr).getTime();
+
+    // กรองเอาเฉพาะ session การนอนของวันดังกล่าว
+    if (startT >= sleepStartMs && endT <= sleepEndMs) {
+      const rawStages = sleepObj.stages;
+      if (Array.isArray(rawStages)) {
+        for (const s of rawStages) {
+          const sStart = new Date(s.startTime).getTime();
+          const sEnd = new Date(s.endTime).getTime();
+          if (isNaN(sStart) || !sEnd || isNaN(sEnd)) continue;
+
+          const minutes = Math.round((sEnd - sStart) / 60_000);
+          const type = String(s.type).toUpperCase();
+
+          if (type === "DEEP") {
+            stages.deep += minutes;
+          } else if (type === "REM") {
+            stages.rem += minutes;
+          } else if (type === "LIGHT") {
+            stages.light += minutes;
+          } else if (type === "AWAKE") {
+            stages.awake += minutes;
+          } else if (type === "RESTLESS") {
+            stages.restless += minutes;
+          }
+        }
+      }
+    }
+  }
+
+  return stages;
+}
+
 export function parseSleepMinutes(data: SleepReconcileResponse): number {
   let totalMinutes = 0;
   for (const point of data.dataPoints ?? []) {
@@ -515,6 +574,10 @@ export async function fetchHealthDataForDate(
     sleepData.dataPoints,
     dateLabel,
   );
+  const sleepStages = parseSleepStagesForDate(
+    sleepData.dataPoints,
+    dateLabel,
+  );
   const totalCalories = parseTotalCaloriesForDate(totalCaloriesData, dateLabel);
   const azm = parseActiveZoneMinutesForDate(activeZoneMinutesData, dateLabel);
   const rhr = parseRestingHeartRateForDate(
@@ -535,6 +598,7 @@ export async function fetchHealthDataForDate(
     stepGoalPercent,
     sleepDurationMinutes: sleepMinutes,
     sleepDurationFormatted: formatSleepDuration(sleepMinutes),
+    sleepStages,
     heartRateAvg: heartRate.avg,
     heartRateMin: heartRate.min,
     heartRateMax: heartRate.max,
@@ -683,6 +747,10 @@ export async function fetchWeeklyHealthData(
       sleepData.dataPoints,
       dateLabel,
     );
+    const sleepStages = parseSleepStagesForDate(
+      sleepData.dataPoints,
+      dateLabel,
+    );
     const totalCalories = parseTotalCaloriesForDate(
       totalCaloriesData,
       dateLabel,
@@ -702,6 +770,7 @@ export async function fetchWeeklyHealthData(
       stepGoalPercent,
       sleepDurationMinutes: sleepMinutes,
       sleepDurationFormatted: formatSleepDuration(sleepMinutes),
+      sleepStages,
       heartRateAvg: heartRate.avg,
       heartRateMin: heartRate.min,
       heartRateMax: heartRate.max,

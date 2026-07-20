@@ -69,59 +69,42 @@ function formatSleepForPrompt(data: SleepReconcileResponse): string {
  * รวมทั้งข้อมูล summary + raw JSON เพื่อให้ AI วิเคราะห์ได้ลึก
  */
 function buildPrompt(health: HealthData): string {
-  const rawJson = JSON.stringify(
-    {
-      steps: health.rawData.steps,
-      heartRate: health.rawData.heartRate,
-      sleep: health.rawData.sleep,
-      totalCalories: health.rawData.totalCalories,
-      activeZoneMinutes: health.rawData.activeZoneMinutes,
-      restingHeartRate: health.rawData.restingHeartRate,
-    },
-    null,
-    2,
-  );
-
   const sleepFormatted = formatSleepForPrompt(health.rawData.sleep);
+  const stages = health.sleepStages;
+  let sleepStagesStr = "ไม่มีข้อมูล Sleep Stages";
+  if (stages) {
+    sleepStagesStr = `Deep Sleep ${stages.deep} นาที, REM Sleep ${stages.rem} นาที, Light Sleep ${stages.light} นาที, Restlessness ${stages.restless} นาที, Awake ${stages.awake} นาที`;
+  }
 
   return `คุณคือผู้เชี่ยวชาญด้านสุขภาพและที่ปรึกษาส่วนตัว (Health Coach) ที่ให้คำแนะนำอย่างอบอุ่น สุภาพ และเป็นมิตร
 
 ต่อไปนี้คือข้อมูลสุขภาพของผู้ใช้เมื่อวาน (${health.date}):
 
 ## ข้อมูลสรุป
-- 👟 จำนวนก้าว: ${health.steps.toLocaleString()} ก้าว (${health.stepGoalPercent}% ของเป้าหมาย 10,000 ก้าว)
-- 😴 เวลานอน: ${health.sleepDurationFormatted}
-- ❤️ อัตราการเต้นหัวใจเฉลี่ย: ${health.heartRateAvg} bpm (ต่ำสุด ${health.heartRateMin} | สูงสุด ${health.heartRateMax})
-- 🔥 พลังงานที่เผาผลาญ: ${health.totalCalories} kcal
-- ⚡ Active Zone Minutes: ${health.activeZoneMinutesTotal} นาที (Fat Burn: ${health.activeZoneMinutesDetails.fatBurn} นาที, Cardio: ${health.activeZoneMinutesDetails.cardio} นาที, Peak: ${health.activeZoneMinutesDetails.peak} นาที)
-- 💓 ชีพจรขณะพัก (Resting HR): ${health.restingHeartRate > 0 ? `${health.restingHeartRate} bpm` : "ไม่มีข้อมูล"}
+- จำนวนก้าว: ${health.steps.toLocaleString()} ก้าว (${health.stepGoalPercent}% ของเป้าหมาย 10,000 ก้าว)
+- เวลานอน: ${health.sleepDurationFormatted} (${sleepStagesStr})
+- อัตราการเต้นหัวใจเฉลี่ย: ${health.heartRateAvg} bpm (ต่ำสุด ${health.heartRateMin} | สูงสุด ${health.heartRateMax})
+- พลังงานที่เผาผลาญ: ${health.totalCalories} kcal
+- Active Zone Minutes: ${health.activeZoneMinutesTotal} นาที (Fat Burn: ${health.activeZoneMinutesDetails.fatBurn} นาที, Cardio: ${health.activeZoneMinutesDetails.cardio} นาที, Peak: ${health.activeZoneMinutesDetails.peak} นาที)
+- ชีพจรขณะพัก (Resting HR): ${health.restingHeartRate > 0 ? `${health.restingHeartRate} bpm` : "ไม่มีข้อมูล"}
 
-## ช่วงเวลานอนหลับ (เวลาประเทศไทย GMT+7 แล้ว — ใช้ข้อมูลชุดนี้ในการวิเคราะห์)
+## ช่วงเวลานอนหลับ (เวลาประเทศไทย GMT+7)
 ${sleepFormatted}
 
-## ข้อมูล JSON ดิบจาก Google Fit
-⚠️ หมายเหตุ: เวลาทั้งหมดใน JSON นี้เป็น UTC — ต้องบวก 7 ชั่วโมงเพื่อแปลงเป็นเวลาไทย
-\`\`\`json
-${rawJson}
-\`\`\`
-
 ## งานของคุณ
-กรุณาวิเคราะห์ข้อมูลสุขภาพข้างต้นและเขียนรายงานสรุปด้วยน้ำเสียงที่สุภาพ อบอุ่น เป็นมิตร และมีความเป็นมืออาชีพ โดยเน้นความ **กระชับ ตรงประเด็น** และมีโครงสร้างดังนี้:
+กรุณาวิเคราะห์ข้อมูลสุขภาพข้างต้นและเขียนรายงานสรุปด้วยน้ำเสียงที่สุภาพ อบอุ่น เป็นมิตร และมีความเป็นมืออาชีพ โดยเน้นความ กระชับ ตรงประเด็น ไม่เยิ่นเย้อ โดยมีโครงสร้างการนำเสนอดังนี้:
 
-1. **คำทักทาย**: ทักทายอย่างสุภาพและเปิดประเด็นเข้าสู่การดูรายงานของเมื่อวานอย่างอบอุ่นและกระชับ (เช่น "สวัสดีครับ มาดูภาพรวมสุขภาพของเมื่อวานกันนะครับ" หรือ "สวัสดีครับ วันนี้เรามาดูรายละเอียดสุขภาพของเมื่อวานกันครับ")
-2. **จุดที่ทำได้ดี**: ชื่นชมพฤติกรรมที่ดีอย่างสมเหตุสมผลและสั้นกระชับ
-3. **การวิเคราะห์**: อธิบายสถิติตัวชี้วัด (ก้าวเดิน, การนอนหลับ, ชีพจร, แคลอรี่, Active Zone Minutes, ชีพจรขณะพัก) ด้วยภาษาที่สั้นกระชับ เข้าใจง่าย และตรงประเด็น
-4. **คำแนะนำ**: แนะนำสิ่งที่ควรทำในวันนี้ 2-3 ข้อสั้นๆ ที่ทำได้จริง
-5. **กำลังใจ**: ปิดท้ายด้วยการให้กำลังใจสั้นๆ อย่างจริงใจ
+1. คำทักทาย: ทักทายสั้นๆ และเปิดประเด็นเข้าสู่การดูรายงานอย่างอบอุ่นและกระชับ
+2. จุดที่ทำได้ดี: ชื่นชมพฤติกรรมที่ดีอย่างสมเหตุสมผลและสั้นกระชับ
+3. การวิเคราะห์: อธิบายสถิติตัวชี้วัดต่างๆ ด้วยภาษาที่สั้นกระชับ เข้าใจง่าย ตรงประเด็น
+4. คำแนะนำ: แนะนำสิ่งที่ควรทำในวันนี้ 2-3 ข้อสั้นๆ ที่ทำได้จริง
+5. กำลังใจ: ปิดท้ายด้วยการให้กำลังใจสั้นๆ อย่างจริงใจ
 
-**ข้อกำหนดที่เข้มงวด:**
-- **ห้ามใช้คำว่า "คุณลูกค้า" เด็ดขาด** ให้ใช้คำว่า "คุณ" หรือละเว้นสรรพนามหากประโยคอ่านลื่นหูอยู่แล้ว
-- ห้ามใช้คำลงท้ายหรือคำอุทานที่ดูฝืนหรือเป็นวัยรุ่นเกินไป เช่น "โค้ชมาแล้ววว", "โย่ววว", "เนอะ", "นะค้าบ"
-- เขียนให้ตรงประเด็นและสั้นกระชับ ลดท่อนน้ำทิ้งและการใช้คำเยิ่นเย้อ
-- **สำคัญ: ใช้ "ช่วงเวลานอนหลับ" ที่แปลงเป็นเวลาไทยแล้วในการวิเคราะห์** ห้ามอ้างอิงเวลา UTC จาก JSON โดยตรง
-- ใช้อิโมจิประกอบได้เล็กน้อยเพื่อความสบายตา
-- ความยาวรวมประมาณ 180-250 คำ
-- ตอบเฉพาะเนื้อหาวิเคราะห์ ห้ามใส่หัวข้อหรือ markdown ที่ไม่จำเป็น (เช่น ห้ามใส่พาดหัวบิ๊กๆ หรือเครื่องหมายขีดคั่นซ้ำซ้อน เพราะระบบมีโครงสร้างหลักอยู่แล้ว)`;
+ข้อกำหนดที่เข้มงวด:
+- ห้ามใช้คำว่า "คุณลูกค้า" เด็ดขาด ให้ใช้คำว่า "คุณ" หรือละเว้นสรรพนาม
+- ห้ามใช้อิโมจิในบทวิเคราะห์โดยเด็ดขาด (เน้นโทนสะอาด คลีน เรียบง่าย)
+- ห้ามใส่หัวข้อใหญ่, ห้ามใช้ Markdown หนาเช่น **จุดที่ทำได้ดี:** หรือเครื่องหมายขีดคั่นใดๆ ทั้งสิ้น ให้ใช้การขึ้นบรรทัดใหม่เพื่อแยกพารากราฟธรรมดาเท่านั้น
+- ความยาวรวมจำกัดที่ 180-250 คำ เท่านั้น`;
 }
 
 function buildWeeklyPrompt(weeklyData: HealthData[]): string {
@@ -144,10 +127,9 @@ function buildWeeklyPrompt(weeklyData: HealthData[]): string {
     0,
   );
   const totalCalories = weeklyData.reduce((sum, d) => sum + d.totalCalories, 0);
-  const avgSleepMins = Math.round(
-    weeklyData.reduce((sum, d) => sum + d.sleepDurationMinutes, 0) /
-      weeklyData.length,
-  );
+  const daysWithSleep = weeklyData.filter((d) => d.sleepDurationMinutes > 0).length;
+  const totalSleepMins = weeklyData.reduce((sum, d) => sum + d.sleepDurationMinutes, 0);
+  const avgSleepMins = daysWithSleep > 0 ? Math.round(totalSleepMins / daysWithSleep) : 0;
   const avgSleepFormatted = `${Math.floor(avgSleepMins / 60)} ชั่วโมง ${avgSleepMins % 60} นาที`;
 
   return `คุณคือผู้เชี่ยวชาญด้านสุขภาพและที่ปรึกษาส่วนตัว (Health Coach) ที่ให้คำแนะนำอย่างอบอุ่น สุภาพ และเป็นมิตร
@@ -199,7 +181,7 @@ async function callGeminiApi(prompt: string): Promise<string> {
       },
     ],
     generationConfig: {
-      temperature: 0.8,
+      temperature: 0.4,
       topK: 40,
       topP: 0.95,
       maxOutputTokens: 1024,

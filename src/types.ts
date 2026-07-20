@@ -151,6 +151,14 @@ export interface SleepReconcileResponse {
   nextPageToken?: string;
 }
 
+export interface SleepStages {
+  deep: number;
+  rem: number;
+  light: number;
+  awake: number;
+  restless: number;
+}
+
 // ─── Health Summary ──────────────────────────────────────────────────────────
 
 /** ข้อมูลสุขภาพรวมที่ดึงมาจาก Google Health API v4 */
@@ -160,6 +168,7 @@ export interface HealthData {
   stepGoalPercent: number; // เปอร์เซ็นต์เทียบกับเป้าหมาย 10,000 ก้าว
   sleepDurationMinutes: number; // เวลานอนรวม (นาที)
   sleepDurationFormatted: string; // เวลานอนรูปแบบ "X ชั่วโมง Y นาที"
+  sleepStages?: SleepStages; // ข้อมูลช่วงการนอนหลับแต่ละระดับ (นาที)
   heartRateAvg: number; // อัตราการเต้นหัวใจเฉลี่ย (bpm)
   heartRateMin: number; // ต่ำสุด (bpm)
   heartRateMax: number; // สูงสุด (bpm)
