@@ -57,6 +57,7 @@ jobs:
 
       # ─── Step 1.2: Restore Success Cache ────────────────────────
       - name: 🔍 Check success cache for today
+        if: github.event_name == 'schedule'
         id: cache
         uses: actions/cache/restore@v4
         with:
