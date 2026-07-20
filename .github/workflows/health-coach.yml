@@ -1,7 +1,7 @@
 # .github/workflows/health-coach.yml
 # ─────────────────────────────────────────────────────────────────
 # AI Health Coach — GitHub Actions Scheduled Workflow
-# รันทุกวัน 09:00 น. เวลาไทย (UTC+7 = 02:00 UTC)
+# วันธรรมดารัน 09:30 น. / วันเสาร์-อาทิตย์รัน 10:00 น. เวลาไทย (UTC+7)
 #
 # ⚠️  GitHub cron อาจ delay ได้หลายชั่วโมงในช่วง load สูง
 # ⚠️  Repo ที่ไม่มี push นาน 60 วัน จะถูก disable scheduled workflow อัตโนมัติ
@@ -12,10 +12,10 @@ name: 🏃 Daily Health Coach Report
 on:
   # ─── Scheduled trigger ────────────────────────────────────────
   schedule:
-    # Run at 09:00, 09:30, and 10:00 Asia/Bangkok (UTC+7 = UTC+0)
-    # 09:00 BKK = 02:00 UTC, 09:30 BKK = 02:30 UTC, 10:00 BKK = 03:00 UTC
-    - cron: "0,30 2 * * *"
-    - cron: "0 3 * * *"
+    # วันธรรมดา (จันทร์ - ศุกร์) รันตอน 09:30 น. เวลาไทย (02:30 UTC)
+    - cron: "30 2 * * 1-5"
+    # วันหยุด (เสาร์ - อาทิตย์) รันตอน 10:00 น. เวลาไทย (03:00 UTC)
+    - cron: "0 3 * * 0,6"
 
   # ─── Manual trigger (ทดสอบรันตามต้องการ) ─────────────────────
   workflow_dispatch:
