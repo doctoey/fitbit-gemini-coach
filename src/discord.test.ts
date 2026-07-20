@@ -2,9 +2,10 @@ import { describe, test, expect } from "vitest";
 import {
   safeTruncate,
   getFormattedFooterText,
-  parseSleepStagesForDate,
   buildStatsSection,
+  pickColor,
 } from "./discord";
+import { parseSleepStagesForDate } from "./googleFit";
 import { HealthData, SleepReconcileResponse } from "./types";
 
 describe("Discord Helper Functions", () => {
@@ -40,6 +41,67 @@ describe("Discord Helper Functions", () => {
       const result = getFormattedFooterText(baseText);
       expect(result).toContain(baseText);
       expect(result).toMatch(/• \d{1,2} [ก-๙.]+\s\d{2} • \d{2}:\d{2} น\./);
+    });
+  });
+
+  // ─── Tests for pickColor ──────────────────────────────────────────────────
+  describe("pickColor", () => {
+    const COLOR = {
+      EXCELLENT: 0x2ecc71,
+      GOOD: 0x3498db,
+      AVERAGE: 0xf39c12,
+      POOR: 0xe74c3c,
+    };
+
+    const mockHealthBase = {
+      stepGoalPercent: 0,
+      sleepDurationMinutes: 0,
+      heartRateAvg: 0,
+      activeZoneMinutesTotal: 0,
+    } as unknown as HealthData;
+
+    test("returns EXCELLENT when score is >= 6", () => {
+      const health = {
+        ...mockHealthBase,
+        stepGoalPercent: 100, // +2
+        sleepDurationMinutes: 420, // +2
+        heartRateAvg: 70, // +2 (between 60 and 100)
+        activeZoneMinutesTotal: 30, // +2
+      };
+      expect(pickColor(health)).toBe(COLOR.EXCELLENT); // score = 8
+    });
+
+    test("returns GOOD when score is >= 4 and < 6", () => {
+      const health = {
+        ...mockHealthBase,
+        stepGoalPercent: 50, // +1
+        sleepDurationMinutes: 300, // +1
+        heartRateAvg: 70, // +2
+        activeZoneMinutesTotal: 10, // +0
+      };
+      expect(pickColor(health)).toBe(COLOR.GOOD); // score = 4
+    });
+
+    test("returns AVERAGE when score is >= 2 and < 4", () => {
+      const health = {
+        ...mockHealthBase,
+        stepGoalPercent: 0, // +0
+        sleepDurationMinutes: 300, // +1
+        heartRateAvg: 120, // +1 (not between 60 and 100)
+        activeZoneMinutesTotal: 0, // +0
+      };
+      expect(pickColor(health)).toBe(COLOR.AVERAGE); // score = 2
+    });
+
+    test("returns POOR when score is < 2", () => {
+      const health = {
+        ...mockHealthBase,
+        stepGoalPercent: 0, // +0
+        sleepDurationMinutes: 0, // +0
+        heartRateAvg: 120, // +1
+        activeZoneMinutesTotal: 0, // +0
+      };
+      expect(pickColor(health)).toBe(COLOR.POOR); // score = 1
     });
   });
 
@@ -117,7 +179,7 @@ describe("Discord Helper Functions", () => {
         },
       } as unknown as HealthData;
 
-      const stages = parseSleepStagesForDate(health);
+      const stages = parseSleepStagesForDate(health.rawData.sleep.dataPoints, health.date);
       expect(stages.awake).toBe(30);
       expect(stages.deep).toBe(60);
       expect(stages.rem).toBe(60);
@@ -134,7 +196,7 @@ describe("Discord Helper Functions", () => {
         },
       } as unknown as HealthData;
 
-      const stages = parseSleepStagesForDate(health);
+      const stages = parseSleepStagesForDate(health.rawData.sleep.dataPoints, health.date);
       expect(stages.deep).toBe(0);
       expect(stages.rem).toBe(0);
       expect(stages.light).toBe(0);
@@ -177,6 +239,7 @@ describe("Discord Helper Functions", () => {
         stepGoalPercent: 80,
         sleepDurationMinutes: 480,
         sleepDurationFormatted: "8 ชั่วโมง 0 นาที",
+        sleepStages: { deep: 60, rem: 60, light: 0, restless: 0, awake: 0 },
         heartRateAvg: 70,
         heartRateMin: 50,
         heartRateMax: 100,
