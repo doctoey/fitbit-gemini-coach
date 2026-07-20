@@ -19,7 +19,7 @@ const COLOR = {
   POOR: 0xe74c3c, // แดง
 };
 
-function pickColor(health: HealthData): number {
+export function pickColor(health: HealthData): number {
   const score =
     (health.stepGoalPercent >= 100 ? 2 : health.stepGoalPercent >= 50 ? 1 : 0) +
     (health.sleepDurationMinutes >= 420

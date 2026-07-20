@@ -15,7 +15,7 @@ const GEMINI_MODEL = "gemini-3.5-flash"; // Newest Flash (May 2026), supports ge
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
 /** แปลง UTC ISO string เป็นเวลาไทย (Bangkok GMT+7) รูปแบบ HH:MM น. */
-function toThaiTime(utcStr: string): string {
+export function toThaiTime(utcStr: string): string {
   return (
     new Date(utcStr).toLocaleTimeString("th-TH", {
       timeZone: "Asia/Bangkok",
@@ -27,7 +27,7 @@ function toThaiTime(utcStr: string): string {
 }
 
 /** สรุป sleep sessions เป็น text ที่ Gemini อ่านได้ถูกต้อง (เวลาไทยแล้ว) */
-function formatSleepForPrompt(data: SleepReconcileResponse): string {
+export function formatSleepForPrompt(data: SleepReconcileResponse): string {
   const points = data.dataPoints ?? [];
   if (points.length === 0) return "ไม่มีข้อมูลการนอนหลับ";
 
@@ -68,7 +68,7 @@ function formatSleepForPrompt(data: SleepReconcileResponse): string {
  * สร้าง prompt ที่ละเอียดและมีบริบทสำหรับ Gemini
  * รวมทั้งข้อมูล summary + raw JSON เพื่อให้ AI วิเคราะห์ได้ลึก
  */
-function buildPrompt(health: HealthData): string {
+export function buildPrompt(health: HealthData): string {
   const sleepFormatted = formatSleepForPrompt(health.rawData.sleep);
   const stages = health.sleepStages;
   let sleepStagesStr = "ไม่มีข้อมูล Sleep Stages";
@@ -107,7 +107,7 @@ ${sleepFormatted}
 - ความยาวรวมจำกัดที่ 180-250 คำ เท่านั้น`;
 }
 
-function buildWeeklyPrompt(weeklyData: HealthData[]): string {
+export function buildWeeklyPrompt(weeklyData: HealthData[]): string {
   const dateRangeStr = `${weeklyData[0].date} ถึง ${weeklyData[weeklyData.length - 1].date}`;
 
   const dailySummaryTable = [

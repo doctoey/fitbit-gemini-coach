@@ -231,6 +231,43 @@ describe("Google Fit Parsers & Date Helpers", () => {
     expect(rhr).toBe(58);
   });
 
+  test("parseSleepMinutesForDate fallback when minutesAsleep is missing", () => {
+    const mockSleepMissingMinutes = [
+      {
+        sleep: {
+          interval: {
+            startTime: "2026-07-12T23:00:00+07:00",
+            endTime: "2026-07-13T06:30:00+07:00",
+          },
+        },
+      },
+    ];
+    const mins = parseSleepMinutesForDate(mockSleepMissingMinutes, "2026-07-12");
+    expect(mins).toBe(450);
+  });
+
+  test("parseSleepMinutes fallback when minutesAsleep is missing", () => {
+    const mockSleepMissingMinutes: SleepReconcileResponse = {
+      dataPoints: [
+        {
+          sleep: {
+            interval: {
+              startTime: "2026-07-12T23:00:00+07:00",
+              endTime: "2026-07-13T06:30:00+07:00",
+            },
+          },
+        },
+      ],
+    };
+    const mins = parseSleepMinutes(mockSleepMissingMinutes);
+    expect(mins).toBe(450);
+  });
+
+  test("parseRestingHeartRate returns 0 when no data points are present", () => {
+    const rhr = parseRestingHeartRate({ dataPoints: [] });
+    expect(rhr).toBe(0);
+  });
+
   test("formatSleepDuration formats minutes into text correctly", () => {
     expect(formatSleepDuration(0)).toBe("ไม่มีข้อมูล");
     expect(formatSleepDuration(410)).toBe("6 ชั่วโมง 50 นาที");
