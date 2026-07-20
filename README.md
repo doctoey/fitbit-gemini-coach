@@ -11,13 +11,17 @@
 fitbit-gemini-coach/
 ├── .github/
 │   └── workflows/
-│       └── health-coach.yml  # ⏰ GitHub Actions (รันอัตโนมัติทุกเช้า + มีระบบ Retry)
+│       └── health-coach.yml  # ⏰ GitHub Actions (รันอัตโนมัติทุกเช้า)
 ├── src/
 │   ├── index.ts       # 🎯 Entry point — Orchestrator หลัก
 │   ├── auth.ts        # 🔑 Google OAuth token refresh
+│   ├── auth.test.ts   # 🧪 Unit Tests สำหรับ auth.ts
 │   ├── googleFit.ts   # 📊 Google Health API v4 (ดึงข้อมูล ก้าว, นอน, ชีพจร, Active Zone, แคลอรี่)
+│   ├── googleFit.test.ts # 🧪 Unit Tests สำหรับ googleFit.ts
 │   ├── gemini.ts      # 🤖 Gemini AI Analysis & Weekly Trends
+│   ├── gemini.test.ts # 🧪 Unit Tests สำหรับ gemini.ts
 │   ├── discord.ts     # 📨 Discord Webhook sender (รายงานประจำวัน & สรุปประจำสัปดาห์)
+│   ├── discord.test.ts # 🧪 Unit Tests สำหรับ discord.ts
 │   └── types.ts       # 📐 TypeScript interfaces
 ├── .env.example       # 📋 ตัวอย่าง environment variables
 ├── .gitignore
@@ -76,18 +80,12 @@ npm run test       # รันทดสอบด้วย Vitest
 
 ## ⏰ รันอัตโนมัติด้วย GitHub Actions
 
-ระบบใช้ **GitHub Actions Scheduled Workflow** ร่วมกับระบบแคชและอัปเดตข้อมูลอัตโนมัติ เพื่อป้องกันการส่งข้อมูลขาดหายและหลีกเลี่ยงการส่งรายงานซ้ำซ้อน
+ระบบใช้ **GitHub Actions Scheduled Workflow** เพื่อดึงข้อมูล วิเคราะห์ และส่งรายงานเข้า Discord โดยอัตโนมัติ
 
-### กลไกการรันอัจฉริยะ (Smart Retry & Cache)
-1. **กำหนดการรัน**: ระบบจะพยายามรันทุกเช้าที่เวลา **09:00 น., 09:30 น. และ 10:00 น. เวลาไทย** (02:00, 02:30, 03:00 UTC)
-2. **การเช็กข้อมูลการนอน (Sleep Sync)**: 
-   - หากรันรอบ 09:00 หรือ 09:30 น. แล้วพบเวลานอนเป็น `0` (เนื่องจากนาฬิกายังไม่ได้ซิงค์ข้อมูลกับ Google) ระบบจะ**ข้ามการส่งรายงานรอบนั้น** เพื่อรอรอบถัดไปที่ข้อมูลน่าจะพร้อม
-   - ในรอบสุดท้าย (**10:00 น.**) หรือเมื่อสั่งรันแบบ Manual/Push Test ระบบจะส่งรายงานเสมอโดยไม่สนใจว่าเวลานอนจะเป็น 0 หรือไม่
-3. **การป้องกันส่งซ้ำ (Caching)**: เมื่อส่งรายงานสำเร็จแล้ว ระบบจะบันทึกแคช `.health-coach-success` ในวันนั้น ๆ หาก workflow ทำงานในรอบถัดไปจะข้ามการทำงานโดยอัตโนมัติเพื่อประหยัดโควตาและไม่รบกวนใน Discord
-
-### การทริกเกอร์แบบอื่น
-- **Manual Trigger**: ไปที่หน้า **Actions -> 🏃 Daily Health Coach Report -> Run workflow**
-- **Push to Test**: สั่ง push ไปที่ branch `test` (เช่น `git push origin main:test`) ระบบจะทำงานและส่งรายงานให้ทันทีโดยไม่สนแคชหรือเวลานอนว่าเป็น 0 หรือไม่
+### กำหนดการทำงาน
+- **เวลาทำงานอัตโนมัติ**: **วันธรรมดา (จันทร์ - ศุกร์) เวลา 09:30 น.** และ **วันหยุด (เสาร์ - อาทิตย์) เวลา 10:00 น. เวลาไทย** (02:30 และ 03:00 UTC)
+- **Manual Trigger**: ไปที่หน้า **Actions -> 🏃 Daily Health Coach Report -> Run workflow** เพื่อสั่งรันเมื่อไหร่ก็ได้ที่ต้องการ
+- **Push to Test**: สั่ง push ไปที่ branch `test` (เช่น `git push origin main:test`) ระบบจะทำงานและส่งรายงานให้ทันที โดยไม่สนใจว่าเวลานอนจะเป็น 0 หรือไม่
 
 ### ตั้งค่า GitHub Secrets
 
@@ -113,8 +111,9 @@ npm run test       # รันทดสอบด้วย Vitest
 | `start` | `node dist/index.js` | รัน production (ใช้ใน GitHub Actions) |
 | `build:ci` | `tsc --noEmit && tsc` | Type-check + build รวมขั้นตอนเดียว |
 | `lint` | `tsc --noEmit` | ตรวจสอบ type errors ทั่วทั้งโปรเจกต์ |
-| `test` | `vitest run` | รัน unit tests ทั้งหมด (รันใน GitHub Actions CI ด้วย) |
-| `test:watch` | `vitest` | รัน unit tests ใน watch mode บน local |
+| `test` | `vitest run src/` | รัน unit tests ทั้งหมด (รันใน GitHub Actions CI ด้วย) |
+| `test:watch` | `vitest src/` | รัน unit tests ใน watch mode บน local |
+| `test:cov` | `vitest run src/ --coverage` | รัน unit tests พร้อมเช็ค Code Coverage |
 
 ---
 
