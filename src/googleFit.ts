@@ -375,25 +375,25 @@ export function parseSleepStagesForDate(
           const minutes = Math.round((sEnd - sStart) / 60_000);
           const type = String(s.type).toUpperCase();
 
-          if (type === "DEEP") {
+          if (type === "DEEP" || type === "DEEP_SLEEP") {
             stages.deep += minutes;
-          } else if (type === "REM") {
+          } else if (type === "REM" || type === "REM_SLEEP") {
             stages.rem += minutes;
-          } else if (type === "LIGHT") {
+          } else if (type === "LIGHT" || type === "LIGHT_SLEEP") {
             stages.light += minutes;
-          } else if (type === "AWAKE") {
+          } else if (type === "AWAKE" || type === "AWAKE_IN_BED") {
             stages.awake += minutes;
-          } else if (type === "RESTLESS") {
+          } else if (type === "RESTLESS" || type === "RESTLESSNESS") {
             stages.restless += minutes;
+          } else {
+            console.warn(`    ⚠️ พบ Sleep Stage Type ที่ไม่ได้แม็ป: "${s.type}" (${minutes} นาที)`);
           }
         }
       }
     }
   }
 
-  console.log(
-    `    ↳ Sleep Stages: Deep ${stages.deep}m | REM ${stages.rem}m | Light ${stages.light}m | Restless ${stages.restless}m | Awake ${stages.awake}m`,
-  );
+  console.log(`    ↳ Sleep Stages Parsed: Deep ${stages.deep}m | REM ${stages.rem}m | Light ${stages.light}m | Restless ${stages.restless}m | Awake ${stages.awake}m`);
 
   return stages;
 }
@@ -596,8 +596,11 @@ export async function fetchHealthDataForDate(
   const stepGoalPercent = Math.round((steps / STEP_GOAL) * 100);
 
   console.log(
-    `✅ [${dateLabel}] ก้าว: ${steps.toLocaleString()} | นอน: ${sleepMinutes} นาที | แคลอรี่: ${totalCalories} kcal | Active Min: ${azm.total} นาที`,
+    `✅ [${dateLabel}] ก้าว: ${steps.toLocaleString()} (${stepGoalPercent}%) | นอน: ${sleepMinutes} นาที | แคลอรี่: ${totalCalories} kcal | Active Min: ${azm.total} นาที`,
   );
+  console.log(`    ├─ 😴 Sleep Stages: Deep ${sleepStages.deep}m | REM ${sleepStages.rem}m | Light ${sleepStages.light}m | Restless ${sleepStages.restless}m | Awake ${sleepStages.awake}m`);
+  console.log(`    ├─ ❤️ Heart Rate: Avg ${heartRate.avg} bpm (Min ${heartRate.min} | Max ${heartRate.max}) | RHR: ${rhr > 0 ? `${rhr} bpm` : "N/A"}`);
+  console.log(`    └─ ⚡ Active Zones: FatBurn ${azm.fatBurn}m | Cardio ${azm.cardio}m | Peak ${azm.peak}m`);
 
   return {
     date: dateLabel,
