@@ -342,7 +342,13 @@ export function parseSleepStagesForDate(
   const sleepStartMs = new Date(`${dateStr}T18:00:00+07:00`).getTime();
   const sleepEndMs = new Date(`${nextDayStr}T13:00:00+07:00`).getTime();
 
-  const stages: SleepStages = { deep: 0, rem: 0, light: 0, awake: 0, restless: 0 };
+  const stages: SleepStages = {
+    deep: 0,
+    rem: 0,
+    light: 0,
+    awake: 0,
+    restless: 0,
+  };
 
   for (const point of allPoints) {
     const p = point as any;
@@ -384,6 +390,10 @@ export function parseSleepStagesForDate(
       }
     }
   }
+
+  console.log(
+    `    ↳ Sleep Stages: Deep ${stages.deep}m | REM ${stages.rem}m | Light ${stages.light}m | Restless ${stages.restless}m | Awake ${stages.awake}m`,
+  );
 
   return stages;
 }
@@ -574,10 +584,7 @@ export async function fetchHealthDataForDate(
     sleepData.dataPoints,
     dateLabel,
   );
-  const sleepStages = parseSleepStagesForDate(
-    sleepData.dataPoints,
-    dateLabel,
-  );
+  const sleepStages = parseSleepStagesForDate(sleepData.dataPoints, dateLabel);
   const totalCalories = parseTotalCaloriesForDate(totalCaloriesData, dateLabel);
   const azm = parseActiveZoneMinutesForDate(activeZoneMinutesData, dateLabel);
   const rhr = parseRestingHeartRateForDate(
