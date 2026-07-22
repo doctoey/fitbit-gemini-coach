@@ -195,7 +195,6 @@ async function callGeminiApi(prompt: string): Promise<string> {
       topK: 40,
       topP: 0.95,
       maxOutputTokens: 1024,
-      thinkingConfig: { thinkingBudget: 0 },
     },
   };
 

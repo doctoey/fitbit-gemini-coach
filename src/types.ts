@@ -206,9 +206,6 @@ export interface GeminiRequest {
     topK: number;
     topP: number;
     maxOutputTokens: number;
-    thinkingConfig?: {
-      thinkingBudget: number; // 0 = disable thinking (ลด latency + ค่าใช้จ่าย)
-    };
   };
 }
 
