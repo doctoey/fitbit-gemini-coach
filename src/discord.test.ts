@@ -203,6 +203,59 @@ describe("Discord Helper Functions", () => {
       expect(stages.restless).toBe(0);
       expect(stages.awake).toBe(0);
     });
+
+    test("parses sleep stage aliases such as RESTLESSNESS, DEEP_SLEEP, etc.", () => {
+      const mockSleep: SleepReconcileResponse = {
+        dataPoints: [
+          {
+            sleep: {
+              interval: {
+                startTime: "2026-07-12T23:00:00+07:00",
+                endTime: "2026-07-13T06:30:00+07:00",
+              },
+              stages: [
+                {
+                  startTime: "2026-07-12T23:00:00+07:00",
+                  endTime: "2026-07-12T23:10:00+07:00",
+                  type: "RESTLESSNESS",
+                },
+                {
+                  startTime: "2026-07-12T23:10:00+07:00",
+                  endTime: "2026-07-12T23:40:00+07:00",
+                  type: "DEEP_SLEEP",
+                },
+                {
+                  startTime: "2026-07-12T23:40:00+07:00",
+                  endTime: "2026-07-13T00:10:00+07:00",
+                  type: "REM_SLEEP",
+                },
+                {
+                  startTime: "2026-07-13T00:10:00+07:00",
+                  endTime: "2026-07-13T01:00:00+07:00",
+                  type: "LIGHT_SLEEP",
+                },
+                {
+                  startTime: "2026-07-13T01:00:00+07:00",
+                  endTime: "2026-07-13T01:15:00+07:00",
+                  type: "AWAKE_IN_BED",
+                },
+              ],
+            },
+          },
+        ],
+      };
+
+      const stages = parseSleepStagesForDate(
+        mockSleep.dataPoints,
+        "2026-07-12",
+      );
+
+      expect(stages.restless).toBe(10);
+      expect(stages.deep).toBe(30);
+      expect(stages.rem).toBe(30);
+      expect(stages.light).toBe(50);
+      expect(stages.awake).toBe(15);
+    });
   });
 
   // ─── Tests for buildStatsSection ─────────────────────────────────────────

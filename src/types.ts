@@ -200,6 +200,9 @@ export interface GeminiContent {
 }
 
 export interface GeminiRequest {
+  systemInstruction?: {
+    parts: Array<{ text: string }>;
+  };
   contents: GeminiContent[];
   generationConfig: {
     temperature: number;
