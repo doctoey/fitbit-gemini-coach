@@ -60,7 +60,7 @@ describe("Gemini Helper Functions", () => {
     } as unknown as HealthData;
 
     const prompt = buildPrompt(mockHealth);
-    expect(prompt).toContain("คุณคือผู้เชี่ยวชาญด้านสุขภาพ");
+    expect(prompt).toContain("ต่อไปนี้คือข้อมูลสุขภาพของผู้ใช้เมื่อวาน");
     expect(prompt).toContain("9,500 ก้าว");
     expect(prompt).toContain("7 ชั่วโมง 0 นาที");
     expect(prompt).toContain("72 bpm");

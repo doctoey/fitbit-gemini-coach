@@ -9,9 +9,8 @@ import {
   SleepReconcileResponse,
 } from "./types";
 
-// โมเดลล่าสุดของ Gemini — อัปเดตจาก models list (July 2026)
-// Ref: GET https://generativelanguage.googleapis.com/v1beta/models?key=...
-const GEMINI_MODEL = "gemini-3.5-flash-lite"; // Fast, high free tier quota model (500 RPD)
+// โมเดลล่าสุดของ Gemini (July 2026) — 500 RPD Free Tier
+const GEMINI_MODEL = "gemini-3.5-flash-lite";
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
 /** แปลง UTC ISO string เป็นเวลาไทย (Bangkok GMT+7) รูปแบบ HH:MM น. */
@@ -65,8 +64,7 @@ export function formatSleepForPrompt(data: SleepReconcileResponse): string {
 }
 
 /**
- * สร้าง prompt ที่ละเอียดและมีบริบทสำหรับ Gemini
- * รวมทั้งข้อมูล summary + raw JSON เพื่อให้ AI วิเคราะห์ได้ลึก
+ * สร้าง prompt สำหรับวิเคราะห์ข้อมูลสุขภาพรายวัน
  */
 export function buildPrompt(health: HealthData): string {
   const sleepFormatted = formatSleepForPrompt(health.rawData.sleep);
@@ -76,9 +74,7 @@ export function buildPrompt(health: HealthData): string {
     sleepStagesStr = `Deep Sleep ${stages.deep} นาที, REM Sleep ${stages.rem} นาที, Light Sleep ${stages.light} นาที, Restlessness ${stages.restless} นาที, Awake ${stages.awake} นาที`;
   }
 
-  return `คุณคือผู้เชี่ยวชาญด้านสุขภาพและที่ปรึกษาส่วนตัว (Health Coach) ที่ให้คำแนะนำอย่างอบอุ่น สุภาพ และเป็นมิตร
-
-ต่อไปนี้คือข้อมูลสุขภาพของผู้ใช้เมื่อวาน (${health.date}):
+  return `ต่อไปนี้คือข้อมูลสุขภาพของผู้ใช้เมื่อวาน (${health.date}):
 
 ## ข้อมูลสรุป
 - จำนวนก้าว: ${health.steps.toLocaleString()} ก้าว (${health.stepGoalPercent}% ของเป้าหมาย 10,000 ก้าว)
@@ -92,7 +88,7 @@ export function buildPrompt(health: HealthData): string {
 ${sleepFormatted}
 
 ## งานของคุณ
-กรุณาวิเคราะห์ข้อมูลสุขภาพข้างต้นและเขียนรายงานสรุปด้วยน้ำเสียงที่สุภาพ อบอุ่น เป็นมิตร และมีความเป็นมืออาชีพ โดยเน้นความ กระชับ ตรงประเด็น ไม่เยิ่นเย้อ โดยมีโครงสร้างการนำเสนอดังนี้:
+กรุณาวิเคราะห์ข้อมูลสุขภาพข้างต้นและเขียนรายงานสรุปให้กระชับ ตรงประเด็น โดยมีโครงสร้างการนำเสนอดังนี้:
 
 1. คำทักทาย: ทักทายสั้นๆ และเปิดประเด็นเข้าสู่การดูรายงานอย่างอบอุ่นและกระชับ
 2. จุดที่ทำได้ดี: ชื่นชมพฤติกรรมที่ดีอย่างสมเหตุสมผลและสั้นกระชับ นำหน้าด้วยเครื่องหมายขีดแดช (-)
@@ -112,10 +108,13 @@ ${sleepFormatted}
   - บรรทัดถัดมา: แสดงส่วน "คำแนะนำ" โดยเริ่มบรรทัดด้วย "- คำแนะนำสำหรับวันนี้: " จากนั้นให้ขึ้นบรรทัดใหม่และย่อหน้าเข้าไปเล็กน้อยเพื่อแสดงรายการคำแนะนำย่อย 2-3 ข้อโดยใช้เครื่องหมายขีดแดช (-) นำหน้า (เช่น - ปรับเวลาเข้านอนเป็นช่วง 22:00 - 23:00 น....) ห้ามใช้ Markdown ตัวหนาในข้อคำแนะนำย่อย และระบุตัวเลขเวลา/เป้าหมายเชิงรูปธรรมที่ชัดเจนในคำแนะนำ เมื่อจบส่วนนี้ให้เว้นบรรทัดว่าง 1 บรรทัด
   - บรรทัดสุดท้าย: เขียนข้อความให้กำลังใจปิดท้ายสั้นๆ
 - ในเนื้อหาของข้อการวิเคราะห์ ให้ระบุช่วงเวลาเข้านอนและตื่นนอน (เช่น เข้านอนเวลา XX:XX น. และตื่นนอนเวลา YY:YY น.) จากข้อมูลช่วงเวลานอนหลับที่ให้ไว้ด้วยทุกครั้ง
-- ห้ามใช้คำลงท้ายหรือคำสร้อยที่ฟุ่มเฟือยซ้ำซาก (เช่น ยอดเยี่ยมมากครับ, เลยทีเดียวครับ) ให้กระชับ สุภาพ และจริงใจ
+- ห้ามใช้คำลงท้ายหรือคำสร้อยที่ฟุ่มเฟือยซ้ำซาก ให้กระชับ สุภาพ และจริงใจ
 - ความยาวรวมจำกัดที่ 180-250 คำ เท่านั้น`;
 }
 
+/**
+ * สร้าง prompt สำหรับวิเคราะห์แนวโน้มสุขภาพรายสัปดาห์
+ */
 export function buildWeeklyPrompt(weeklyData: HealthData[]): string {
   const dateRangeStr = `${weeklyData[0].date} ถึง ${weeklyData[weeklyData.length - 1].date}`;
 
@@ -142,9 +141,7 @@ export function buildWeeklyPrompt(weeklyData: HealthData[]): string {
   );
   const avgSleepFormatted = `${Math.floor(avgSleepMins / 60)} ชั่วโมง ${avgSleepMins % 60} นาที`;
 
-  return `คุณคือผู้เชี่ยวชาญด้านสุขภาพและที่ปรึกษาส่วนตัว (Health Coach) ที่ให้คำแนะนำอย่างอบอุ่น สุภาพ และเป็นมิตร
-
-ต่อไปนี้คือข้อมูลสุขภาพโดยรวมรายสัปดาห์ของผู้ใช้ (${dateRangeStr}):
+  return `ต่อไปนี้คือข้อมูลสุขภาพโดยรวมรายสัปดาห์ของผู้ใช้ (${dateRangeStr}):
 
 ## ตารางข้อมูลรายวัน
 ${dailySummaryTable}
@@ -156,7 +153,7 @@ ${dailySummaryTable}
 - เผาผลาญพลังงานรวมทั้งสัปดาห์: ${totalCalories.toLocaleString()} kcal
 
 ## งานของคุณ
-กรุณาวิเคราะห์แนวโน้มสุขภาพของผู้ใช้ตลอดสัปดาห์ที่ผ่านมา และเขียนรายงานสรุปภาพรวมรายสัปดาห์ (Weekly Report) ด้วยน้ำเสียงที่สุภาพ อบอุ่น เป็นมิตร และเป็นมืออาชีพ โดยเน้นความ กระชับ ตรงประเด็น และมีโครงสร้างดังนี้:
+กรุณาวิเคราะห์แนวโน้มสุขภาพของผู้ใช้ตลอดสัปดาห์ที่ผ่านมา และเขียนรายงานสรุปภาพรวมรายสัปดาห์ (Weekly Report) โดยเน้นความกระชับ ตรงประเด็น และมีโครงสร้างดังนี้:
 
 1. คำทักทาย: ทักทายสั้นๆ และเปิดประเด็นเข้าสู่รายงานสรุปประจำสัปดาห์อย่างอบอุ่น
 2. ภาพรวมสัปดาห์นี้: สรุปภาพรวมสัปดาห์สั้นๆ
@@ -167,6 +164,7 @@ ${dailySummaryTable}
 
 ข้อกำหนดที่เข้มงวดเพื่อความสวยงามในรูปแบบ Minimal:
 - ห้ามใช้คำว่า "คุณลูกค้า" เด็ดขาด ให้ใช้คำว่า "คุณ" หรือละเว้นสรรพนาม
+- รูปแบบตัวเลข: ให้แสดงผลตัวเลขเป็น "ตัวเลขอารบิก" เสมอ ห้ามเขียนสะกดเป็นตัวหนังสือเด็ดขาด
 - ห้ามใช้อิโมจิในบทวิเคราะห์โดยเด็ดขาดในทุกจุด (เพื่อรักษาโทนสีและดีไซน์ให้สะอาด คลีน)
 - การแบ่งส่วนหัวข้อ: ให้ใช้ Markdown ตัวหนาครอบชื่อหัวข้อหลักเท่านั้น โดยระบุชื่อหัวข้อตรงๆ ดังนี้: **ภาพรวมสัปดาห์นี้**, **จุดเด่นและพัฒนาการที่ดี**, **แนวโน้มและการวิเคราะห์**, และ **คำแนะนำสำหรับสัปดาห์ถัดไป** โดยการขึ้นต้นบรรทัดใหม่แยกจากเนื้อหา
 - ในเนื้อหาภายในแต่ละส่วน: ห้ามแตกบรรทัดย่อยเป็นข้อยิบย่อย ให้เขียนเนื้อหาร้อยเรียงกันเป็นพารากราฟสั้นๆ ที่ลื่นไหลต่อเนื่องกันเพื่อความเป็นระเบียบ
@@ -185,6 +183,13 @@ async function callGeminiApi(prompt: string): Promise<string> {
   const url = `${GEMINI_BASE}/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
   const requestBody: GeminiRequest = {
+    systemInstruction: {
+      parts: [
+        {
+          text: "คุณคือผู้เชี่ยวชาญด้านสุขภาพและที่ปรึกษาส่วนตัว (Health Coach) ที่ให้คำแนะนำอย่างอบอุ่น สุภาพ และเป็นมิตร ให้ปฏิบัติตามข้อกำหนดเรื่องรูปแบบตัวเลขอารบิก ย่อหน้า และการเว้นระยะอย่างเคร่งครัด",
+        },
+      ],
+    },
     contents: [
       {
         role: "user",
@@ -207,22 +212,29 @@ async function callGeminiApi(prompt: string): Promise<string> {
     try {
       response = await axios.post<GeminiResponse>(url, requestBody, {
         headers: { "Content-Type": "application/json" },
+        timeout: 30000, // 30 วินาที
       });
       break;
     } catch (err) {
       const isAxiosError = axios.isAxiosError(err);
       const status = isAxiosError ? err.response?.status : null;
+      const code = isAxiosError ? err.code : null;
 
       console.warn(
-        `⚠️ [Attempt ${attempt}/${MAX_RETRIES}] Gemini API ขัดข้อง (Status: ${status ?? "Unknown"})`,
+        `⚠️ [Attempt ${attempt}/${MAX_RETRIES}] Gemini API ขัดข้อง (Status: ${status ?? "Unknown"}, Code: ${code ?? "N/A"})`,
       );
 
       if (isAxiosError && err.response) {
         console.error("   Detail:", JSON.stringify(err.response.data, null, 2));
       }
 
+      // รองรับทั้ง 503, 429, Network error และ Request Timeout (ECONNABORTED / ETIMEDOUT)
       if (
-        (status === 503 || status === 429 || !status) &&
+        (status === 503 ||
+          status === 429 ||
+          !status ||
+          code === "ECONNABORTED" ||
+          code === "ETIMEDOUT") &&
         attempt < MAX_RETRIES
       ) {
         console.log(`   กำลังลองใหม่ในอีก ${delay / 1000} วินาที...`);
