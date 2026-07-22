@@ -84,8 +84,7 @@ npm run test       # รันทดสอบด้วย Vitest
 
 ### กำหนดการทำงาน
 - **เวลาทำงานอัตโนมัติ**: **ทุกวันเวลา 09:45 น. เวลาไทย** (02:45 UTC) เพื่อให้รายงานส่งเข้า Discord ถึงผู้ใช้ประมาณ **10:00 น.** (ชดเชยเวลาคิวดีเลย์ของ GitHub Actions)
-- **Manual Trigger**: ไปที่หน้า **Actions -> 🏃 Daily Health Coach Report -> Run workflow** เพื่อสั่งรันเมื่อไหร่ก็ได้ที่ต้องการ
-- **Push to Test**: สั่ง push ไปที่ branch `test` (เช่น `git push origin main:test`) ระบบจะทำงานและส่งรายงานให้ทันที โดยไม่สนใจว่าเวลานอนจะเป็น 0 หรือไม่
+- **Manual Trigger**: ไปที่หน้า **Actions -> 🏃 Daily Health Coach Report -> Run workflow** เพื่อสั่งรันมือได้ตลอดเวลาจากทุก Branch (เช่น `main`) โดยไม่ถูกบล็อกด้วย Cache ประจำวัน
 
 ### ตั้งค่า GitHub Secrets
 

@@ -20,10 +20,6 @@ on:
         required: false
         default: "Manual test run"
 
-  # ─── Push trigger: push ไปที่ branch 'test' เพื่อทดสอบ ────────
-  push:
-    branches:
-      - test
 
 # ─── Concurrency: ป้องกัน workflow ซ้อนกันรัน ───────────────────
 concurrency:
@@ -50,6 +46,7 @@ jobs:
 
       # ─── Step 1.2: Restore Success Cache ────────────────────────
       - name: 🔍 Check success cache for today
+        if: github.event_name == 'schedule'
         id: cache
         uses: actions/cache/restore@v4
         with:
