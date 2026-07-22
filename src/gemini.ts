@@ -11,7 +11,7 @@ import {
 
 // โมเดลล่าสุดของ Gemini — อัปเดตจาก models list (July 2026)
 // Ref: GET https://generativelanguage.googleapis.com/v1beta/models?key=...
-const GEMINI_MODEL = "gemini-3.5-flash"; // Newest Flash (May 2026), supports generateContent
+const GEMINI_MODEL = "gemini-3.5-flash-lite"; // Fast, high free tier quota model (500 RPD)
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 
 /** แปลง UTC ISO string เป็นเวลาไทย (Bangkok GMT+7) รูปแบบ HH:MM น. */

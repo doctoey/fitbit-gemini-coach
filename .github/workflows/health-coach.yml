@@ -1,10 +1,7 @@
 # .github/workflows/health-coach.yml
 # ─────────────────────────────────────────────────────────────────
 # AI Health Coach — GitHub Actions Scheduled Workflow
-# วันธรรมดารัน 09:30 น. / วันเสาร์-อาทิตย์รัน 10:00 น. เวลาไทย (UTC+7)
-#
-# ⚠️  GitHub cron อาจ delay ได้หลายชั่วโมงในช่วง load สูง
-# ⚠️  Repo ที่ไม่มี push นาน 60 วัน จะถูก disable scheduled workflow อัตโนมัติ
+# ตั้งรัน 09:45 น. เวลาไทย (02:45 UTC) เพื่อส่งรายงานถึง Discord ประมาณ 10:00 น.
 # ─────────────────────────────────────────────────────────────────
 
 name: 🏃 Daily Health Coach Report
@@ -12,10 +9,8 @@ name: 🏃 Daily Health Coach Report
 on:
   # ─── Scheduled trigger ────────────────────────────────────────
   schedule:
-    # วันธรรมดา (จันทร์ - ศุกร์) รันตอน 09:30 น. เวลาไทย (02:30 UTC)
-    - cron: "30 2 * * 1-5"
-    # วันหยุด (เสาร์ - อาทิตย์) รันตอน 10:00 น. เวลาไทย (03:00 UTC)
-    - cron: "0 3 * * 0,6"
+    # รันตอน 09:45 น. เวลาไทย (02:45 UTC) เผื่อคิว GitHub Actions เพื่อให้ส่งจริงช่วง 10:00 น. ต้นๆ
+    - cron: "45 2 * * *"
 
   # ─── Manual trigger (ทดสอบรันตามต้องการ) ─────────────────────
   workflow_dispatch:
@@ -25,12 +20,6 @@ on:
         required: false
         default: "Manual test run"
 
-  # ─── Push trigger: push ไปที่ branch 'test' เพื่อทดสอบ ────────
-  # วิธีใช้: git push origin main:test
-  # จะ trigger workflow ทันที ไม่ต้องรอ cron
-  push:
-    branches:
-      - test
 
 # ─── Concurrency: ป้องกัน workflow ซ้อนกันรัน ───────────────────
 concurrency:
@@ -69,19 +58,9 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         id: attempt
         run: |
-          TRIGGER="${{ github.event_name }}"
-          HOUR="${{ steps.date.outputs.hour }}"
-          
-          if [ "$TRIGGER" != "schedule" ]; then
-            echo "LAST_ATTEMPT=true" >> $GITHUB_ENV
-            echo "Is last attempt (Manual/Push): true"
-          elif [ "$HOUR" -ge 10 ]; then
-            echo "LAST_ATTEMPT=true" >> $GITHUB_ENV
-            echo "Is last attempt (Final morning run): true"
-          else
-            echo "LAST_ATTEMPT=false" >> $GITHUB_ENV
-            echo "Is last attempt (Scheduled retry): false"
-          fi
+          # เนื่องจากรันรอบเดียวตอน 09:45 น. ให้ตั้งค่าเป็น LAST_ATTEMPT=true เสมอเพื่อดึงข้อมูลส่งทันที
+          echo "LAST_ATTEMPT=true" >> $GITHUB_ENV
+          echo "Is last attempt: true"
 
       # ─── Step 2: Setup Node.js ──────────────────────────────────
       - name: ⚙️ Setup Node.js 22
